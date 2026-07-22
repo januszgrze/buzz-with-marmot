@@ -1,4 +1,4 @@
-<h1 align="center">Buzz + Marmot</h1>
+<h1 align="center">Encrypted channels in Buzz with Marmot</h1>
 
 <p align="center">
   A small, local desktop demo of public Nostr messages and Marmot-encrypted group chat.
