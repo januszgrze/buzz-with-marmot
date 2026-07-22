@@ -11,7 +11,7 @@
 This demo lets two local desktop identities—Alice and Bob—talk through one
 local Nostr relay. Normal Buzz channel messages are readable by the relay.
 Marmot group messages are encrypted before publication, so the relay stores
-only ciphertext.
+only ciphertext and cannot discern the contents of messages within the Marmot group messages.
 
 > **Demo only.** This is a desktop, text-only proof of concept. Read the
 > [Security](#security) section before using it.
@@ -84,10 +84,9 @@ so each can publish its profile and Marmot KeyPackage.
 
 ## Send a public message
 
-1. In Alice, open **Browse channels** → **Create a new channel**.
-2. Name it something like `public-test`; leave **Encrypted** off.
-3. Send `public test: relay can read this`.
-4. In Bob, browse to and open `#public-test`, then send a reply.
+1. In Alice, go to `welcome` and send a message.
+2. Send `public test: relay can read this`.
+3. In Bob, browse to and open `#welcome`, then send a reply.
 
 These are normal Buzz stream-message events. The relay stores their message
 body in plaintext.
@@ -199,7 +198,7 @@ just down
 
 ## Contributing
 
-This is a small example built quickly with agent assistance—yes, it is vibe
+This is a small example built quickly with agent assistance. It is fully vibe
 coded. It is not looking for contributions, feature requests, or production
 hardening work.
 
