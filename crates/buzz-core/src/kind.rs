@@ -56,6 +56,16 @@ pub const KIND_CHANNEL_METADATA: u32 = 41;
 pub const KIND_DELETION: u32 = 5;
 /// NIP-25: Content is emoji char or `+`/`-`.
 pub const KIND_REACTION: u32 = 7;
+/// Marmot: unsigned Welcome rumor carried inside a NIP-59 gift wrap.
+///
+/// This kind is registered for protocol documentation and client parsing only;
+/// the relay never accepts it as a directly submitted signed event.
+pub const KIND_MARMOT_WELCOME_RUMOR: u32 = 444;
+/// Marmot: opaque MLS group transport envelope.
+///
+/// The outer event is signed by a fresh ephemeral Nostr key and routed by one
+/// random 32-byte `h` tag. It is not a NIP-29/Buzz channel event.
+pub const KIND_MARMOT_GROUP_MESSAGE: u32 = 445;
 /// NIP-17: Outer envelope for private DMs — hides sender, content, timestamp.
 pub const KIND_GIFT_WRAP: u32 = 1059;
 /// NIP-94: File metadata attachment.
@@ -64,6 +74,11 @@ pub const KIND_FILE_METADATA: u32 = 1063;
 /// Parameterized replaceable (NIP-33, 30000–39999 range) — keyed by `(pubkey, kind, d_tag)`.
 /// Stored globally (channel_id = NULL); author-owned, not channel-scoped.
 pub const KIND_LONG_FORM: u32 = 30023;
+/// Marmot: parameterized-replaceable MLS KeyPackage event.
+///
+/// The event is authored by the Nostr account identity and contains only the
+/// public half of an asynchronous invitation KeyPackage.
+pub const KIND_MARMOT_KEY_PACKAGE: u32 = 30443;
 /// NIP-38: User status (general, music, or custom d-tag).
 /// Parameterized replaceable (NIP-33, 30000–39999 range) — keyed by `(pubkey, kind, d_tag)`.
 /// Stored globally (channel_id = NULL); user-owned personal data, not channel-scoped.
@@ -502,6 +517,8 @@ pub const ALL_KINDS: &[u32] = &[
     KIND_CHANNEL_METADATA,
     KIND_DELETION,
     KIND_REACTION,
+    KIND_MARMOT_WELCOME_RUMOR,
+    KIND_MARMOT_GROUP_MESSAGE,
     KIND_GIFT_WRAP,
     KIND_FILE_METADATA,
     KIND_AGENT_PROFILE,
@@ -580,6 +597,7 @@ pub const ALL_KINDS: &[u32] = &[
     KIND_AGENT_TURN_METRIC,
     KIND_WORKFLOW_DEF,
     KIND_LONG_FORM,
+    KIND_MARMOT_KEY_PACKAGE,
     KIND_USER_STATUS,
     KIND_READ_STATE,
     KIND_FORUM_POST,
@@ -661,6 +679,16 @@ pub const fn is_relay_admin_kind(kind: u32) -> bool {
 /// commands, so they are intentionally excluded.
 pub const fn is_identity_archive_request_kind(kind: u32) -> bool {
     matches!(kind, KIND_IA_ARCHIVE_REQUEST | KIND_IA_UNARCHIVE_REQUEST)
+}
+
+/// Returns `true` when a transport envelope intentionally uses a fresh outer
+/// signer instead of the authenticated account principal.
+///
+/// This is deliberately a closed allowlist. Callers must still verify the
+/// event's NIP-01 id/signature and apply the kind-specific public-envelope
+/// validation before accepting it.
+pub const fn outer_signer_may_differ_from_principal(kind: u32) -> bool {
+    matches!(kind, KIND_GIFT_WRAP | KIND_MARMOT_GROUP_MESSAGE)
 }
 
 /// Returns `true` if `kind` is a Buzz command kind that requires transactional execution.
@@ -760,6 +788,21 @@ mod tests {
     fn nip43_membership_snapshot_is_relay_only() {
         assert!(is_relay_only_kind(KIND_NIP43_MEMBERSHIP_LIST));
         assert!(!is_relay_only_kind(KIND_NIP43_LEAVE_REQUEST));
+    }
+
+    #[test]
+    fn ephemeral_outer_signer_allowlist_is_narrow() {
+        assert!(outer_signer_may_differ_from_principal(KIND_GIFT_WRAP));
+        assert!(outer_signer_may_differ_from_principal(
+            KIND_MARMOT_GROUP_MESSAGE
+        ));
+        assert!(!outer_signer_may_differ_from_principal(
+            KIND_MARMOT_WELCOME_RUMOR
+        ));
+        assert!(!outer_signer_may_differ_from_principal(
+            KIND_MARMOT_KEY_PACKAGE
+        ));
+        assert!(!outer_signer_may_differ_from_principal(KIND_TEXT_NOTE));
     }
 
     #[test]

@@ -595,6 +595,15 @@ mod tests {
         StoredEvent::with_received_at(event, Utc::now(), channel_id, true)
     }
 
+    fn make_stored_event_with_h(kind: Kind, h: &str, channel_id: Option<Uuid>) -> StoredEvent {
+        let keys = Keys::generate();
+        let event = EventBuilder::new(kind, "test")
+            .tags([Tag::parse(["h", h]).expect("valid h tag")])
+            .sign_with_keys(&keys)
+            .expect("sign");
+        StoredEvent::with_received_at(event, Utc::now(), channel_id, true)
+    }
+
     #[test]
     fn test_subscription_registry_register_and_fan_out() {
         let registry = SubscriptionRegistry::new();
@@ -610,6 +619,33 @@ mod tests {
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].0, conn_id);
         assert_eq!(matches[0].1, sub_id);
+    }
+
+    #[test]
+    fn marmot_global_fanout_matches_exact_routing_h_tag() {
+        let registry = SubscriptionRegistry::new();
+        let kind = Kind::Custom(buzz_core::kind::KIND_MARMOT_GROUP_MESSAGE as u16);
+        let route_a = "aa".repeat(32);
+        let route_b = "bb".repeat(32);
+        let h_tag = SingleLetterTag::lowercase(Alphabet::H);
+        let conn_a = Uuid::new_v4();
+        let conn_b = Uuid::new_v4();
+
+        registry.register(
+            conn_a,
+            "route-a".into(),
+            vec![Filter::new().kind(kind).custom_tag(h_tag, route_a.clone())],
+            None,
+        );
+        registry.register(
+            conn_b,
+            "route-b".into(),
+            vec![Filter::new().kind(kind).custom_tag(h_tag, route_b.clone())],
+            None,
+        );
+
+        let event = make_stored_event_with_h(kind, &route_a, None);
+        assert_eq!(registry.fan_out(&event), vec![(conn_a, "route-a".into())]);
     }
 
     #[test]

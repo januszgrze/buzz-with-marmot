@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use base64::Engine as _;
 use chrono::Utc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -12,16 +13,17 @@ use uuid::Uuid;
 use buzz_auth::Scope;
 use buzz_core::kind::{
     event_kind_u32, is_identity_archive_request_kind, is_parameterized_replaceable,
-    is_relay_admin_kind, KIND_AGENT_ENGRAM, KIND_AGENT_PROFILE, KIND_AGENT_TURN_METRIC,
-    KIND_APPROVAL_DENY, KIND_APPROVAL_GRANT, KIND_AUTH, KIND_BOOKMARK_LIST, KIND_BOOKMARK_SET,
-    KIND_CANVAS, KIND_CONTACT_LIST, KIND_DELETION, KIND_DM_ADD_MEMBER, KIND_DM_HIDE, KIND_DM_OPEN,
-    KIND_EMOJI_LIST, KIND_EMOJI_SET, KIND_EVENT_REMINDER, KIND_FOLLOW_SET, KIND_FORUM_COMMENT,
-    KIND_FORUM_POST, KIND_FORUM_VOTE, KIND_GIFT_WRAP, KIND_GIT_ISSUE, KIND_GIT_PATCH,
-    KIND_GIT_PR_UPDATE, KIND_GIT_PULL_REQUEST, KIND_GIT_REPO_ANNOUNCEMENT, KIND_GIT_REPO_STATE,
-    KIND_GIT_STATUS_CLOSED, KIND_GIT_STATUS_DRAFT, KIND_GIT_STATUS_MERGED, KIND_GIT_STATUS_OPEN,
-    KIND_HUDDLE_ENDED, KIND_HUDDLE_GUIDELINES, KIND_HUDDLE_PARTICIPANT_JOINED,
-    KIND_HUDDLE_PARTICIPANT_LEFT, KIND_HUDDLE_STARTED, KIND_IA_ARCHIVE_REQUEST,
-    KIND_IA_UNARCHIVE_REQUEST, KIND_LONG_FORM, KIND_MANAGED_AGENT, KIND_MEMBER_ADDED_NOTIFICATION,
+    is_relay_admin_kind, outer_signer_may_differ_from_principal, KIND_AGENT_ENGRAM,
+    KIND_AGENT_PROFILE, KIND_AGENT_TURN_METRIC, KIND_APPROVAL_DENY, KIND_APPROVAL_GRANT, KIND_AUTH,
+    KIND_BOOKMARK_LIST, KIND_BOOKMARK_SET, KIND_CANVAS, KIND_CONTACT_LIST, KIND_DELETION,
+    KIND_DM_ADD_MEMBER, KIND_DM_HIDE, KIND_DM_OPEN, KIND_EMOJI_LIST, KIND_EMOJI_SET,
+    KIND_EVENT_REMINDER, KIND_FOLLOW_SET, KIND_FORUM_COMMENT, KIND_FORUM_POST, KIND_FORUM_VOTE,
+    KIND_GIFT_WRAP, KIND_GIT_ISSUE, KIND_GIT_PATCH, KIND_GIT_PR_UPDATE, KIND_GIT_PULL_REQUEST,
+    KIND_GIT_REPO_ANNOUNCEMENT, KIND_GIT_REPO_STATE, KIND_GIT_STATUS_CLOSED, KIND_GIT_STATUS_DRAFT,
+    KIND_GIT_STATUS_MERGED, KIND_GIT_STATUS_OPEN, KIND_HUDDLE_ENDED, KIND_HUDDLE_GUIDELINES,
+    KIND_HUDDLE_PARTICIPANT_JOINED, KIND_HUDDLE_PARTICIPANT_LEFT, KIND_HUDDLE_STARTED,
+    KIND_IA_ARCHIVE_REQUEST, KIND_IA_UNARCHIVE_REQUEST, KIND_LONG_FORM, KIND_MANAGED_AGENT,
+    KIND_MARMOT_GROUP_MESSAGE, KIND_MARMOT_KEY_PACKAGE, KIND_MEMBER_ADDED_NOTIFICATION,
     KIND_MEMBER_REMOVED_NOTIFICATION, KIND_MODERATION_BAN, KIND_MODERATION_RESOLVE_REPORT,
     KIND_MODERATION_TIMEOUT, KIND_MODERATION_UNBAN, KIND_MODERATION_UNTIMEOUT, KIND_MUTE_LIST,
     KIND_NIP29_CREATE_GROUP, KIND_NIP29_DELETE_EVENT, KIND_NIP29_DELETE_GROUP,
@@ -48,6 +50,27 @@ use crate::conformance::{
     self as conf, channel_label, claimed_community_from_event, emit, msg_id_label,
     state_for_request, EmitGuard, TraceAction, Verdict,
 };
+
+const MAX_TIMESTAMP_DRIFT_SECS: i64 = 900; // ±15 minutes
+const NIP59_TIMESTAMP_TWEAK_SECS: i64 = 172_800; // Up to two days into the past.
+
+/// Check an event timestamp while preserving NIP-59's privacy backdating.
+///
+/// Gift wraps intentionally obscure their publication time by up to two days.
+/// They retain the relay's ordinary clock-skew allowance in both directions,
+/// but only the past window is widened. All other kinds stay at ±15 minutes.
+fn event_timestamp_is_allowed(kind: u32, event_ts: i64, now: i64) -> bool {
+    if event_ts > now {
+        return event_ts.saturating_sub(now) <= MAX_TIMESTAMP_DRIFT_SECS;
+    }
+
+    let max_past_drift = if kind == KIND_GIFT_WRAP {
+        NIP59_TIMESTAMP_TWEAK_SECS + MAX_TIMESTAMP_DRIFT_SECS
+    } else {
+        MAX_TIMESTAMP_DRIFT_SECS
+    };
+    now.saturating_sub(event_ts) <= max_past_drift
+}
 
 /// How the HTTP caller authenticated (for [`IngestAuth::Http`]).
 #[derive(Debug, Clone)]
@@ -185,6 +208,7 @@ fn required_scope_for_kind(kind: u32, event: &Event) -> Result<Scope, &'static s
         KIND_TEXT_NOTE | KIND_LONG_FORM => Ok(Scope::MessagesWrite),
         KIND_CONTACT_LIST | KIND_READ_STATE | KIND_USER_STATUS | KIND_AGENT_ENGRAM
         | KIND_EVENT_REMINDER | KIND_PERSONA | KIND_TEAM | KIND_MANAGED_AGENT
+        | KIND_MARMOT_KEY_PACKAGE
         | super::push_lease::KIND_PUSH_LEASE => {
             Ok(Scope::UsersWrite)
         }
@@ -215,6 +239,7 @@ fn required_scope_for_kind(kind: u32, event: &Event) -> Result<Scope, &'static s
         KIND_DELETION
         | KIND_REACTION
         | KIND_GIFT_WRAP
+        | KIND_MARMOT_GROUP_MESSAGE
         | KIND_STREAM_MESSAGE
         | KIND_STREAM_MESSAGE_V2
         | KIND_NIP29_DELETE_EVENT
@@ -394,6 +419,11 @@ pub(crate) fn is_global_only_kind(kind: u32) -> bool {
             // keyed by (pubkey, kind, d_tag). A stray `h` tag must not channel-scope them.
             | KIND_TEAM
             | KIND_MANAGED_AGENT
+            // Marmot KeyPackages are account-authored, parameterized-replaceable
+            // global state. Group envelopes retain an `h` routing tag but are
+            // deliberately not NIP-29 channels and must keep channel_id NULL.
+            | KIND_MARMOT_KEY_PACKAGE
+            | KIND_MARMOT_GROUP_MESSAGE
             // NIP-34: git events use `a` tags (repo reference), not `h` tags (channel scope).
             // Parameterized replaceable kinds are keyed by (pubkey, kind, d_tag).
             | KIND_GIT_REPO_ANNOUNCEMENT
@@ -934,6 +964,74 @@ fn validate_diff_event(event: &Event) -> Result<(), String> {
     Ok(())
 }
 
+/// Validate the relay-visible portion of a Marmot kind:445 group envelope.
+///
+/// MLS owns the encrypted payload semantics. The relay validates only the
+/// transport shape needed to safely grant the ephemeral-outer-signer exception:
+/// one random 32-byte routing id, an optional NIP-40 expiration, no metadata
+/// tags, and a standard-base64 payload large enough for the 12-byte ChaCha20
+/// nonce plus 16-byte authentication tag.
+fn validate_marmot_group_envelope(event: &Event) -> Result<(), String> {
+    const MIN_DECODED_CONTENT_BYTES: usize = 12 + 16;
+
+    let mut h_count = 0usize;
+    let mut expiration_count = 0usize;
+
+    for tag in event.tags.iter() {
+        let parts = tag.as_slice();
+        match parts.first().map(String::as_str) {
+            Some("h") => {
+                h_count += 1;
+                if parts.len() != 2 {
+                    return Err("Marmot group `h` tag must have exactly two elements".into());
+                }
+                let routing_id = &parts[1];
+                if routing_id.len() != 64
+                    || !routing_id
+                        .bytes()
+                        .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+                {
+                    return Err("Marmot group `h` tag must be 64 lowercase hex chars".into());
+                }
+            }
+            Some("expiration") => {
+                expiration_count += 1;
+                if expiration_count > 1 {
+                    return Err("Marmot group event may have at most one `expiration` tag".into());
+                }
+                if parts.len() != 2
+                    || parts[1].is_empty()
+                    || !parts[1].bytes().all(|b| b.is_ascii_digit())
+                    || parts[1].parse::<u64>().is_err()
+                {
+                    return Err("Marmot group `expiration` tag must be Unix seconds".into());
+                }
+            }
+            Some(_) | None => {
+                return Err("Marmot group event may only contain `h` and `expiration` tags".into());
+            }
+        }
+    }
+
+    if h_count != 1 {
+        return Err(format!(
+            "Marmot group event must have exactly one `h` tag (got {h_count})"
+        ));
+    }
+
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(event.content.as_bytes())
+        .map_err(|_| "Marmot group content must be standard base64".to_string())?;
+    if decoded.len() < MIN_DECODED_CONTENT_BYTES {
+        return Err(format!(
+            "Marmot group content is shorter than nonce plus authentication tag (got {} bytes)",
+            decoded.len()
+        ));
+    }
+
+    Ok(())
+}
+
 /// Validate the public envelope of a NIP-AE `kind:30174` event before it
 /// reaches NIP-33 parameterized replacement.
 ///
@@ -1430,7 +1528,12 @@ async fn ingest_event_inner(
         ));
     }
 
-    if auth.is_http() && (kind_u32 == KIND_GIFT_WRAP || kind_u32 == KIND_PRESENCE_UPDATE) {
+    if auth.is_http()
+        && matches!(
+            kind_u32,
+            KIND_GIFT_WRAP | KIND_MARMOT_GROUP_MESSAGE | KIND_PRESENCE_UPDATE
+        )
+    {
         return Err(IngestError::Rejected(format!(
             "invalid: kind {kind_u32} is only accepted via WebSocket"
         )));
@@ -1461,10 +1564,9 @@ async fn ingest_event_inner(
     }
     let event = std::sync::Arc::try_unwrap(event).unwrap_or_else(|arc| (*arc).clone());
 
-    const MAX_TIMESTAMP_DRIFT_SECS: i64 = 900; // ±15 minutes
     let now = chrono::Utc::now().timestamp();
     let event_ts = event.created_at.as_secs() as i64;
-    if (event_ts - now).abs() > MAX_TIMESTAMP_DRIFT_SECS {
+    if !event_timestamp_is_allowed(kind_u32, event_ts, now) {
         return Err(IngestError::Rejected(
             "invalid: event timestamp too far from server time".into(),
         ));
@@ -1479,8 +1581,16 @@ async fn ingest_event_inner(
         )));
     }
 
-    let is_gift_wrap = kind_u32 == KIND_GIFT_WRAP;
-    if event.pubkey != *auth.pubkey() && !is_gift_wrap {
+    // The outer key is intentionally ephemeral for Marmot group traffic. The
+    // exception is granted only after NIP-01 verification and strict public
+    // envelope validation; MLS content remains opaque to the relay.
+    if kind_u32 == KIND_MARMOT_GROUP_MESSAGE {
+        validate_marmot_group_envelope(&event)
+            .map_err(|e| IngestError::Rejected(format!("invalid: {e}")))?;
+    }
+
+    let has_ephemeral_outer_signer = outer_signer_may_differ_from_principal(kind_u32);
+    if event.pubkey != *auth.pubkey() && !has_ephemeral_outer_signer {
         return Err(IngestError::AuthFailed(
             "invalid: event pubkey does not match authenticated identity".into(),
         ));
@@ -1645,7 +1755,7 @@ async fn ingest_event_inner(
                 )));
             }
         }
-    } else if is_gift_wrap {
+    } else if has_ephemeral_outer_signer {
         None
     } else if kind_u32 == KIND_DELETION {
         // Standard deletion (kind:5): derive channel from the target event.
@@ -2916,6 +3026,78 @@ mod tests {
     }
 
     #[test]
+    fn gift_wrap_timestamp_allows_nip59_privacy_backdating() {
+        let now = 2_000_000;
+
+        assert!(event_timestamp_is_allowed(
+            KIND_GIFT_WRAP,
+            now - NIP59_TIMESTAMP_TWEAK_SECS,
+            now
+        ));
+        assert!(event_timestamp_is_allowed(
+            KIND_GIFT_WRAP,
+            now - NIP59_TIMESTAMP_TWEAK_SECS - MAX_TIMESTAMP_DRIFT_SECS,
+            now
+        ));
+        assert!(!event_timestamp_is_allowed(
+            KIND_GIFT_WRAP,
+            now - NIP59_TIMESTAMP_TWEAK_SECS - MAX_TIMESTAMP_DRIFT_SECS - 1,
+            now
+        ));
+    }
+
+    #[test]
+    fn gift_wrap_timestamp_does_not_widen_future_window() {
+        let now = 2_000_000;
+
+        assert!(event_timestamp_is_allowed(
+            KIND_GIFT_WRAP,
+            now + MAX_TIMESTAMP_DRIFT_SECS,
+            now
+        ));
+        assert!(!event_timestamp_is_allowed(
+            KIND_GIFT_WRAP,
+            now + MAX_TIMESTAMP_DRIFT_SECS + 1,
+            now
+        ));
+    }
+
+    #[test]
+    fn ordinary_event_timestamp_keeps_normal_drift_window() {
+        let now = 2_000_000;
+
+        assert!(event_timestamp_is_allowed(
+            KIND_STREAM_MESSAGE,
+            now - MAX_TIMESTAMP_DRIFT_SECS,
+            now
+        ));
+        assert!(!event_timestamp_is_allowed(
+            KIND_STREAM_MESSAGE,
+            now - MAX_TIMESTAMP_DRIFT_SECS - 1,
+            now
+        ));
+    }
+
+    #[test]
+    fn marmot_transport_kinds_have_narrow_scopes_and_storage_shape() {
+        let dummy = make_dummy_event();
+        assert_eq!(
+            required_scope_for_kind(KIND_MARMOT_GROUP_MESSAGE, &dummy).unwrap(),
+            Scope::MessagesWrite
+        );
+        assert_eq!(
+            required_scope_for_kind(KIND_MARMOT_KEY_PACKAGE, &dummy).unwrap(),
+            Scope::UsersWrite
+        );
+        assert!(is_global_only_kind(KIND_MARMOT_KEY_PACKAGE));
+        assert!(is_global_only_kind(KIND_MARMOT_GROUP_MESSAGE));
+        assert!(!requires_h_channel_scope(KIND_MARMOT_GROUP_MESSAGE));
+        assert!(
+            required_scope_for_kind(buzz_core::kind::KIND_MARMOT_WELCOME_RUMOR, &dummy).is_err()
+        );
+    }
+
+    #[test]
     fn accounting_uses_authenticated_principal_pubkey() {
         let principal = nostr::Keys::generate();
         let envelope_signer = nostr::Keys::generate();
@@ -3039,6 +3221,75 @@ mod tests {
             .tags(nostr_tags)
             .sign_with_keys(&keys)
             .unwrap()
+    }
+
+    fn valid_marmot_content() -> String {
+        base64::engine::general_purpose::STANDARD.encode([0_u8; 28])
+    }
+
+    #[test]
+    fn marmot_group_envelope_accepts_canonical_shape() {
+        let route = "ab".repeat(32);
+        let event = make_event_with_tags(
+            KIND_MARMOT_GROUP_MESSAGE,
+            &valid_marmot_content(),
+            &[&["h", &route], &["expiration", "1900000000"]],
+        );
+        assert!(validate_marmot_group_envelope(&event).is_ok());
+        assert_eq!(extract_channel_id(&event), None);
+    }
+
+    #[test]
+    fn marmot_group_envelope_rejects_bad_route_cardinality_and_shape() {
+        let route = "ab".repeat(32);
+        let other = "cd".repeat(32);
+        let upper = "AB".repeat(32);
+        for tags in [
+            vec![],
+            vec![vec!["h", route.as_str()], vec!["h", other.as_str()]],
+            vec![vec!["h", "not-a-route"]],
+            vec![vec!["h", upper.as_str()]],
+            vec![vec!["h", route.as_str(), "extra"]],
+        ] {
+            let tag_slices: Vec<&[&str]> = tags.iter().map(Vec::as_slice).collect();
+            let event = make_event_with_tags(
+                KIND_MARMOT_GROUP_MESSAGE,
+                &valid_marmot_content(),
+                &tag_slices,
+            );
+            assert!(validate_marmot_group_envelope(&event).is_err());
+        }
+    }
+
+    #[test]
+    fn marmot_group_envelope_rejects_metadata_and_bad_expiration() {
+        let route = "ab".repeat(32);
+        for tags in [
+            vec![vec!["h", route.as_str()], vec!["p", route.as_str()]],
+            vec![vec!["h", route.as_str()], vec!["expiration", "tomorrow"]],
+            vec![
+                vec!["h", route.as_str()],
+                vec!["expiration", "1900000000"],
+                vec!["expiration", "1900000001"],
+            ],
+        ] {
+            let tag_slices: Vec<&[&str]> = tags.iter().map(Vec::as_slice).collect();
+            let event = make_event_with_tags(
+                KIND_MARMOT_GROUP_MESSAGE,
+                &valid_marmot_content(),
+                &tag_slices,
+            );
+            assert!(validate_marmot_group_envelope(&event).is_err());
+        }
+    }
+
+    #[test]
+    fn marmot_group_envelope_rejects_non_base64_and_short_content() {
+        let route = "ab".repeat(32);
+        for content in ["not base64", "AA=="] {
+            let event = make_event_with_tags(KIND_MARMOT_GROUP_MESSAGE, content, &[&["h", &route]]);
+            assert!(validate_marmot_group_envelope(&event).is_err());
+        }
     }
 
     #[test]

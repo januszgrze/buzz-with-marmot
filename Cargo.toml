@@ -26,6 +26,9 @@ members = [
     "crates/buzz-pair-relay",
     "crates/buzz-relay-mesh",
     "crates/buzz-dev-mcp",
+    "crates/buzz-marmot",
+    "crates/buzz-marmot-ipc",
+    "crates/buzz-marmot-sidecar",
     "examples/countdown-bot",
 ]
 exclude = ["desktop/src-tauri"]
@@ -52,6 +55,10 @@ tower-http  = { version = "0.6", features = ["trace", "cors", "compression-gzip"
 sqlx = { version = "0.9", features = [
     "runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono", "json"
 ] }
+# Keep this aligned with the pinned MDK storage graph. It is used only by the
+# native Marmot process boundary, never by the separately-workspaced Tauri
+# executable (which intentionally retains rusqlite 0.37).
+rusqlite = { version = "0.32", features = ["bundled-sqlcipher-vendored-openssl", "trace"] }
 
 # Redis
 redis        = { version = "1.0", features = ["tokio-comp", "connection-manager", "tokio-rustls-comp"] }
@@ -59,6 +66,14 @@ deadpool-redis = { version = "0.23", features = ["rt_tokio_1"] }
 
 # Nostr
 nostr = { version = "0.44", features = ["nip44", "nip98"] }
+
+# Marmot Development Kit (MDK). Keep every MDK crate on the same reviewed
+# commit and update the complete pin set in lockstep.
+cgka-engine = { git = "https://github.com/marmot-protocol/mdk", rev = "e391adc133a9b60e420da7a0446f014a180ac8d2" }
+cgka-session = { git = "https://github.com/marmot-protocol/mdk", rev = "e391adc133a9b60e420da7a0446f014a180ac8d2" }
+cgka-traits = { git = "https://github.com/marmot-protocol/mdk", rev = "e391adc133a9b60e420da7a0446f014a180ac8d2" }
+storage-sqlite = { git = "https://github.com/marmot-protocol/mdk", rev = "e391adc133a9b60e420da7a0446f014a180ac8d2" }
+transport-nostr-peeler = { git = "https://github.com/marmot-protocol/mdk", rev = "e391adc133a9b60e420da7a0446f014a180ac8d2" }
 
 # Serialization
 serde       = { version = "1", features = ["derive"] }
@@ -133,6 +148,8 @@ buzz-media = { path = "crates/buzz-media" }
 buzz-sdk = { path = "crates/buzz-sdk" }
 buzz-ws-client = { path = "crates/buzz-ws-client" }
 buzz-relay-mesh = { path = "crates/buzz-relay-mesh" }
+buzz-marmot = { path = "crates/buzz-marmot" }
+buzz-marmot-ipc = { path = "crates/buzz-marmot-ipc" }
 
 # CI profile — builds the relay for desktop e2e. Dependencies keep full
 # release optimization (warm from main's cache; they carry the runtime hot

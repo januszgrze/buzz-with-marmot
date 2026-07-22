@@ -69,7 +69,7 @@ tauri-plugin-process = "2"
 infer = "0.19"
 hex = "0.4"
 ed25519-dalek = "=3.0.0-rc.0"
-tokio = { version = "1", features = ["fs", "sync", "rt", "macros", "time", "net", "io-util"] }
+tokio = { version = "1", features = ["fs", "sync", "rt", "macros", "time", "net", "io-util", "process"] }
 tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 bytes = "1"
@@ -82,6 +82,7 @@ serde_yaml = "0.9"
 toml = "0.8"
 nostr = { version = "0.44", features = ["nip44"] }
 zeroize = "1"
+getrandom = "0.3"
 reqwest = { version = "0.13", features = ["json", "query", "stream", "blocking"] }
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std"] }
 url = "2"
@@ -89,6 +90,8 @@ buzz_core_pkg = { package = "buzz-core", path = "../../crates/buzz-core" }
 buzz_persona_pkg = { package = "buzz-persona", path = "../../crates/buzz-persona" }
 buzz_sdk_pkg = { package = "buzz-sdk", path = "../../crates/buzz-sdk" }
 buzz_agent_pkg = { package = "buzz-agent", path = "../../crates/buzz-agent" }
+buzz_marmot_ipc = { package = "buzz-marmot-ipc", path = "../../crates/buzz-marmot-ipc" }
+buzz_ws_client_pkg = { package = "buzz-ws-client", path = "../../crates/buzz-ws-client" }
 iroh = { version = "1.0.2", optional = true }
 mesh-llm-sdk = { git = "https://github.com/Mesh-LLM/mesh-llm.git", tag = "v0.73.1", package = "mesh-llm-sdk", default-features = false, features = ["client", "serving"], optional = true }
 mesh-llm-host-runtime = { git = "https://github.com/Mesh-LLM/mesh-llm.git", tag = "v0.73.1", package = "mesh-llm-host-runtime", default-features = false, features = ["dynamic-native-runtime"], optional = true }

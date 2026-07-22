@@ -48,7 +48,7 @@ import { cn } from "@/shared/lib/cn";
 import type { ChannelType } from "@/shared/api/types";
 import { ChannelAutocomplete } from "./ChannelAutocomplete";
 import { ComposerReplyEditBanner } from "./ComposerReplyEditBanner";
-import { ComposerAttachments, DropZoneOverlay } from "./ComposerAttachments";
+import { ComposerMediaStatus, DropZoneOverlay } from "./ComposerAttachments";
 import { EmojiAutocomplete } from "./EmojiAutocomplete";
 import {
   MentionAutocomplete,
@@ -67,6 +67,7 @@ type MessageComposerAudienceContext = {
   initialAgentPubkeys?: readonly string[];
 };
 type MessageComposerProps = {
+  attachmentsEnabled?: boolean;
   audienceContext?: MessageComposerAudienceContext | null;
   channelId?: string | null;
   channelName: string;
@@ -151,6 +152,7 @@ type MessageComposerProps = {
 };
 
 function MessageComposerImpl({
+  attachmentsEnabled = true,
   audienceContext = null,
   channelId = null,
   channelName,
@@ -237,7 +239,7 @@ function MessageComposerImpl({
   // markdown into the Tiptap editor when media upload completes.
   const internalMedia = useMediaUpload();
   const media = mediaController ?? internalMedia;
-  const ownsDropZone = mediaController === undefined;
+  const ownsDropZone = attachmentsEnabled && mediaController === undefined;
 
   // Draft-persist lifecycle: restore/clear content + imeta + spoilered urls on
   // key change, and persist the outgoing draft in the cleanup. The StrictMode
@@ -668,7 +670,9 @@ function MessageComposerImpl({
     }
 
     // Normal send
-    const currentPendingImeta = media.pendingImetaRef.current;
+    const currentPendingImeta = attachmentsEnabled
+      ? media.pendingImetaRef.current
+      : [];
     const hasMedia = currentPendingImeta.length > 0;
     if (
       (!trimmed && !hasMedia) ||
@@ -714,6 +718,7 @@ function MessageComposerImpl({
     customEmoji,
     drafts.loadDraft,
     emojiAutocomplete.clearEmojis,
+    attachmentsEnabled,
     media.pendingImetaRef,
     media.setPendingImeta,
     mentionSendFlow.isPreparingMentionSend,
@@ -856,6 +861,10 @@ function MessageComposerImpl({
           const items = Array.from(event.clipboardData?.items ?? []);
           const mediaItem = items.find((item) => item.kind === "file");
           if (mediaItem) {
+            if (!attachmentsEnabled) {
+              event.preventDefault();
+              return true;
+            }
             const file = mediaItem.getAsFile();
             if (file) {
               void uploadFileRef.current(file);
@@ -891,7 +900,10 @@ function MessageComposerImpl({
           }
 
           // Restore Buzz snapshots before normal styled-HTML normalization.
-          if (handleAgentSnapshotPaste(event, media.setPendingImeta))
+          if (
+            attachmentsEnabled &&
+            handleAgentSnapshotPaste(event, media.setPendingImeta)
+          )
             return true;
           // Strip mention/channel wrappers that Tiptap would misread as bold.
           const html = event.clipboardData?.getData("text/html");
@@ -911,17 +923,24 @@ function MessageComposerImpl({
         },
       },
     });
-  }, [media.setPendingImeta, richText.editor, scrollComposerToBottom]);
+  }, [
+    attachmentsEnabled,
+    media.setPendingImeta,
+    richText.editor,
+    scrollComposerToBottom,
+  ]);
 
   // ── Send button state ───────────────────────────────────────────────
   const sendDisabled = React.useMemo(
     () =>
       disabled ||
-      media.isUploading ||
+      (attachmentsEnabled && media.isUploading) ||
       mentionSendFlow.isPreparingMentionSend ||
-      (isContentEmpty && media.pendingImeta.length === 0),
+      (isContentEmpty &&
+        (!attachmentsEnabled || media.pendingImeta.length === 0)),
     [
       disabled,
+      attachmentsEnabled,
       media.isUploading,
       mentionSendFlow.isPreparingMentionSend,
       isContentEmpty,
@@ -934,8 +953,9 @@ function MessageComposerImpl({
   }, []);
 
   const handlePaperclipClick = React.useCallback(() => {
+    if (!attachmentsEnabled) return;
     void media.handlePaperclip();
-  }, [media.handlePaperclip]);
+  }, [attachmentsEnabled, media.handlePaperclip]);
 
   const handleRemoveAttachment = React.useCallback(
     (url: string) => {
@@ -1031,36 +1051,15 @@ function MessageComposerImpl({
               selectedIndex={mentions.mentionSelectedIndex}
               suggestions={mentions.isMentionOpen ? mentions.suggestions : []}
             />
-            {media.uploadState.status === "error" ? (
-              <div className="mb-2 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                Upload failed: {media.uploadState.message}
-                <button
-                  className="ml-2 underline"
-                  onClick={() => media.setUploadState({ status: "idle" })}
-                  type="button"
-                >
-                  Dismiss
-                </button>
-              </div>
-            ) : null}
-
-            {(media.pendingImeta.length > 0 || media.isUploading) && (
-              <div className="mb-2 flex items-center gap-2">
-                <ComposerAttachments
-                  attachments={media.pendingImeta}
-                  isUploading={media.isUploading}
-                  onCancelUpload={media.cancelUpload}
-                  uploadingCount={media.uploadingCount}
-                  uploadingPreviews={media.uploadingPreviews}
-                  onEditSave={handleAttachmentEditSave}
-                  onRemove={handleRemoveAttachment}
-                  onRevert={handleAttachmentRevert}
-                  originalUrlByUrl={media.originalUrlByUrl}
-                  onToggleSpoiler={handleToggleAttachmentSpoiler}
-                  spoileredUrls={spoileredAttachmentUrls}
-                />
-              </div>
-            )}
+            <ComposerMediaStatus
+              enabled={attachmentsEnabled}
+              media={media}
+              onEditSave={handleAttachmentEditSave}
+              onRemove={handleRemoveAttachment}
+              onRevert={handleAttachmentRevert}
+              onToggleSpoiler={handleToggleAttachmentSpoiler}
+              spoileredUrls={spoileredAttachmentUrls}
+            />
 
             {/* biome-ignore lint/a11y/noStaticElementInteractions: keydown handler bridges Tiptap editor to autocomplete and submit */}
             <div
@@ -1073,6 +1072,7 @@ function MessageComposerImpl({
             </div>
 
             <MessageComposerToolbar
+              attachmentsEnabled={attachmentsEnabled}
               composerDisabled={disabled}
               editor={richText.editor}
               extraActions={toolbarExtraActions}

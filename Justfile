@@ -154,7 +154,7 @@ _ensure-sidecar-stubs:
     set -euo pipefail
     TARGET=$(rustc -vV | sed -n 's|host: ||p')
     mkdir -p desktop/src-tauri/binaries
-    for bin in buzz-acp buzz-agent buzz-dev-mcp git-credential-nostr buzz; do
+    for bin in buzz-acp buzz-agent buzz-dev-mcp buzz-marmot-sidecar git-credential-nostr buzz; do
         touch "desktop/src-tauri/binaries/${bin}-${TARGET}"
     done
 
@@ -229,6 +229,11 @@ desktop-release-build target="aarch64-apple-darwin":
     touch "desktop/src-tauri/binaries/buzz-acp-$TARGET"
     touch "desktop/src-tauri/binaries/buzz-agent-$TARGET"
     touch "desktop/src-tauri/binaries/buzz-dev-mcp-$TARGET"
+    SIDECAR_EXT=""
+    if [[ "$TARGET" == *windows* ]]; then SIDECAR_EXT=".exe"; fi
+    cargo build --release --target "$TARGET" -p buzz-marmot-sidecar
+    cp "target/$TARGET/release/buzz-marmot-sidecar$SIDECAR_EXT" \
+      "desktop/src-tauri/binaries/buzz-marmot-sidecar-$TARGET$SIDECAR_EXT"
     touch "desktop/src-tauri/binaries/git-credential-nostr-$TARGET"
     touch "desktop/src-tauri/binaries/buzz-$TARGET"
     pnpm install
@@ -420,7 +425,7 @@ dev *ARGS: bootstrap _ensure-sidecar-stubs _ensure-migrations
             fi
         done
     fi
-    cargo build -p buzz-acp -p buzz-agent -p buzz-dev-mcp -p buzz-cli -p git-credential-nostr -p buzz-relay
+    cargo build -p buzz-acp -p buzz-agent -p buzz-dev-mcp -p buzz-marmot-sidecar -p buzz-cli -p git-credential-nostr -p buzz-relay
     if [[ -n "{{mesh}}" ]]; then
         export MESH_LLM_NATIVE_RUNTIME_CACHE_DIR="$(./scripts/ensure-mesh-native-runtime.sh)"
     fi
@@ -463,24 +468,25 @@ dev *ARGS: bootstrap _ensure-sidecar-stubs _ensure-migrations
 
 # Run only the desktop app. No relay, database, Docker, migrations, or .env are needed.
 # The app opens normally and asks for a community before making a relay connection.
+# Set BUZZ_DEV_PROFILE to launch another fully isolated instance from this checkout.
 desktop-standalone *ARGS: _ensure-sidecar-stubs
     #!/usr/bin/env bash
     set -euo pipefail
     export PATH="{{justfile_directory()}}/bin:$PATH"
-    cargo build -p buzz-acp -p buzz-agent -p buzz-dev-mcp -p buzz-cli -p git-credential-nostr
+    unset BUZZ_PRIVATE_KEY BUZZ_SHARE_IDENTITY
+    if [[ -n "{{fresh}}" ]]; then
+        export BUZZ_RESET_WEBVIEW_STATE=1
+    fi
+    source scripts/instance-env.sh
+    cargo build -p buzz-acp -p buzz-agent -p buzz-dev-mcp -p buzz-marmot-sidecar -p buzz-cli -p git-credential-nostr
     TARGET=$(rustc -vV | sed -n 's|host: ||p')
     TARGET_DIR=$(cargo metadata --format-version 1 --no-deps | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).target_directory")
-    for bin in buzz-acp buzz-agent buzz-dev-mcp git-credential-nostr buzz; do
+    for bin in buzz-acp buzz-agent buzz-dev-mcp buzz-marmot-sidecar git-credential-nostr buzz; do
         cp "${TARGET_DIR}/debug/${bin}" "desktop/src-tauri/binaries/${bin}-${TARGET}"
         chmod +x "desktop/src-tauri/binaries/${bin}-${TARGET}"
     done
     cd {{desktop_dir}}
     [[ -d node_modules ]] || pnpm install
-    unset BUZZ_PRIVATE_KEY BUZZ_SHARE_IDENTITY
-    if [[ -n "{{fresh}}" ]]; then
-        export BUZZ_RESET_WEBVIEW_STATE=1
-    fi
-    source ../scripts/instance-env.sh
     INSTANCE_ID=$(node -e "console.log(JSON.parse(process.env.BUZZ_TAURI_CONFIG).identifier)")
     export BUZZ_DEV_KEYRING_SERVICE="buzz-desktop-dev.${BUZZ_INSTANCE_SLUG:-main}"
     if [[ -n "{{fresh}}" ]]; then
@@ -490,23 +496,57 @@ desktop-standalone *ARGS: _ensure-sidecar-stubs
     echo "Starting standalone desktop on Vite port ${BUZZ_VITE_PORT}; no relay services were started"
     pnpm exec tauri dev --config "$BUZZ_TAURI_CONFIG" {{ARGS}}
 
+# Launch the isolated Alice desktop used by the manual Marmot preview.
+desktop-preview-alice *ARGS:
+    BUZZ_MARMOT_PREVIEW=1 VITE_BUZZ_LOCAL_PREVIEW=1 BUZZ_DEV_PROFILE=alice just desktop-standalone {{ARGS}}
+
+# Launch the isolated Bob desktop used by the manual Marmot preview.
+desktop-preview-bob *ARGS:
+    BUZZ_MARMOT_PREVIEW=1 VITE_BUZZ_LOCAL_PREVIEW=1 BUZZ_DEV_PROFILE=bob just desktop-standalone {{ARGS}}
+
+# Reset only Alice's development app/webview/keyring state. Build caches and relay data remain.
+desktop-preview-reset-alice:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export PATH="{{justfile_directory()}}/bin:$PATH"
+    export BUZZ_DEV_PROFILE=alice
+    source scripts/instance-env.sh
+    INSTANCE_ID=$(node -e "console.log(JSON.parse(process.env.BUZZ_TAURI_CONFIG).identifier)")
+    scripts/reset-desktop-standalone-state.sh "$INSTANCE_ID" "$BUZZ_DEV_KEYRING_SERVICE"
+
+# Reset only Bob's development app/webview/keyring state. Build caches and relay data remain.
+desktop-preview-reset-bob:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export PATH="{{justfile_directory()}}/bin:$PATH"
+    export BUZZ_DEV_PROFILE=bob
+    source scripts/instance-env.sh
+    INSTANCE_ID=$(node -e "console.log(JSON.parse(process.env.BUZZ_TAURI_CONFIG).identifier)")
+    scripts/reset-desktop-standalone-state.sh "$INSTANCE_ID" "$BUZZ_DEV_KEYRING_SERVICE"
+
+# Verify the Alice/Bob preview profiles use disjoint local resources.
+desktop-preview-profile-test:
+    PATH="{{justfile_directory()}}/bin:$PATH" scripts/test-instance-env-profiles.sh
+
 # Run the desktop app against the internal staging relay (installs deps + builds agent tools automatically)
 staging *ARGS: bootstrap _ensure-sidecar-stubs
     #!/usr/bin/env bash
     set -euo pipefail
     export PATH="{{justfile_directory()}}/bin:$PATH"
     pnpm install  # unconditional: staging must always start with a clean dep tree
-    cargo build --release -p buzz-acp -p buzz-agent -p buzz-dev-mcp -p buzz-cli -p git-credential-nostr
+    cargo build --release -p buzz-acp -p buzz-agent -p buzz-dev-mcp -p buzz-marmot-sidecar -p buzz-cli -p git-credential-nostr
     FEATURES=()
     if [[ -n "{{mesh}}" ]]; then
         FEATURES=(--features mesh-llm)
         export MESH_LLM_NATIVE_RUNTIME_CACHE_DIR="$(./scripts/ensure-mesh-native-runtime.sh)"
     fi
-    # Replace the 0-byte sidecar stub with the real CLI binary so tauri dev picks it up.
+    # Replace the 0-byte stubs for binaries used directly by the desktop runtime.
     TARGET=$(rustc -vV | sed -n 's|host: ||p')
     TARGET_DIR=$(cargo metadata --format-version 1 --no-deps | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).target_directory")
-    cp "${TARGET_DIR}/release/buzz" "desktop/src-tauri/binaries/buzz-${TARGET}"
-    chmod +x "desktop/src-tauri/binaries/buzz-${TARGET}"
+    for bin in buzz buzz-marmot-sidecar; do
+        cp "${TARGET_DIR}/release/${bin}" "desktop/src-tauri/binaries/${bin}-${TARGET}"
+        chmod +x "desktop/src-tauri/binaries/${bin}-${TARGET}"
+    done
     cd {{desktop_dir}}
     export BUZZ_RELAY_URL="wss://sprout-oss.stage.blox.sqprod.co"
     source ../scripts/instance-env.sh

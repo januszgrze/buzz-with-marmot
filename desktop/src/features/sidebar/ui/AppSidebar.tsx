@@ -43,6 +43,12 @@ import {
   SectionQuickAction,
 } from "@/features/sidebar/ui/CustomChannelSection";
 import { CreateChannelDialog } from "@/features/sidebar/ui/CreateChannelDialog";
+import type {
+  CreateEncryptedChannelInput,
+  EncryptedMemberOption,
+} from "@/features/sidebar/lib/useCreateChannelForm";
+import type { MarmotConversation } from "@/features/marmot/api";
+import { MarmotSidebarSection } from "@/features/marmot/ui/MarmotSidebarSection";
 import { SidebarProfileCard } from "@/features/sidebar/ui/SidebarProfileCard";
 import { SidebarRelayConnectionCard } from "@/features/sidebar/ui/SidebarRelayConnectionCard";
 import type { useSidebarRelayConnectionCard } from "@/features/sidebar/ui/useSidebarRelayConnectionCard";
@@ -116,6 +122,12 @@ type AppSidebarProps = {
     ttlSeconds?: number;
     templateId?: string;
   }) => Promise<void>;
+  onCreateEncryptedChannel?: (
+    input: CreateEncryptedChannelInput,
+  ) => Promise<void>;
+  supportsEncryptedChannels?: boolean;
+  encryptedConversations?: MarmotConversation[];
+  encryptedMemberOptions?: EncryptedMemberOption[];
   onCreateForum: (input: {
     name: string;
     description?: string;
@@ -195,6 +207,7 @@ export function AppSidebar({
   onAddCommunity,
   onAddCommunityOpenChange,
   onCreateChannel,
+  onCreateEncryptedChannel,
   onCreateForum,
   onOpenAddCommunity,
   onSendFeedback,
@@ -232,6 +245,9 @@ export function AppSidebar({
   starredChannelIds,
   onStarChannel,
   onUnstarChannel,
+  supportsEncryptedChannels,
+  encryptedConversations = [],
+  encryptedMemberOptions = [],
 }: AppSidebarProps) {
   const activeWorkingByChannelId = useActiveWorkingChannelsById();
   const { status: updateStatus } = useUpdaterContext();
@@ -785,6 +801,11 @@ export function AppSidebar({
                       onDeleteChannel={requestDeleteChannel}
                     />
                   </FeatureGate>
+                  <MarmotSidebarSection
+                    conversations={encryptedConversations}
+                    onSelectConversation={onSelectChannel}
+                    selectedConversationId={selectedChannelId}
+                  />
                   <SidebarSection
                     action={
                       <div className="absolute right-1 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5">
@@ -913,6 +934,9 @@ export function AppSidebar({
           }
         }}
         onCreate={handleCreateFromDialog}
+        onCreateEncrypted={onCreateEncryptedChannel}
+        supportsEncryptedChannels={supportsEncryptedChannels}
+        encryptedMemberOptions={encryptedMemberOptions}
       />
 
       <AddCommunityDialog

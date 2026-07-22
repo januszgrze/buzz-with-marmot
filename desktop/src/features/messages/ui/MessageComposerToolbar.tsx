@@ -19,6 +19,7 @@ const presenceSpring = {
 export const MessageComposerToolbar = React.memo(
   function MessageComposerToolbar({
     composerDisabled,
+    attachmentsEnabled = true,
     editor,
     extraActions,
     formattingDisabled,
@@ -36,6 +37,7 @@ export const MessageComposerToolbar = React.memo(
     sendDisabled,
   }: {
     composerDisabled: boolean;
+    attachmentsEnabled?: boolean;
     editor: Editor | null;
     extraActions?: React.ReactNode;
     formattingDisabled: boolean;
@@ -180,7 +182,9 @@ export const MessageComposerToolbar = React.memo(
                   <TooltipTrigger asChild>
                     <Button
                       aria-label="Attach image"
-                      disabled={composerDisabled || isUploading}
+                      disabled={
+                        composerDisabled || !attachmentsEnabled || isUploading
+                      }
                       onClick={onPaperclip}
                       onMouseDown={onCaptureSelection}
                       size="icon"
@@ -190,7 +194,11 @@ export const MessageComposerToolbar = React.memo(
                       <Paperclip />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>Attach image</TooltipContent>
+                  <TooltipContent>
+                    {attachmentsEnabled
+                      ? "Attach image"
+                      : "Encrypted attachments are not available yet"}
+                  </TooltipContent>
                 </Tooltip>
                 <ComposerEmojiPicker
                   disabled={composerDisabled}

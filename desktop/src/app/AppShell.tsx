@@ -29,6 +29,13 @@ import { useUnreadChannels } from "@/features/channels/useUnreadChannels";
 import { msgContextKey } from "@/features/channels/readState/readStateFormat";
 import { useMembershipNotifications } from "@/features/channels/useMembershipNotifications";
 import { useFeedItemState } from "@/features/home/useFeedItemState";
+import { useRelayMembersQuery } from "@/features/community-members/hooks";
+import {
+  useCreateMarmotConversationMutation,
+  useMarmotBridgeStatusQuery,
+  useMarmotConversationsQuery,
+  useMarmotProjectionEvents,
+} from "@/features/marmot/hooks";
 import { useThreadFollows } from "@/features/messages/lib/useThreadFollows";
 import {
   useHomeFeedNotifications,
@@ -55,7 +62,7 @@ import { useCommunityEmojiLiveUpdates } from "@/features/custom-emoji/hooks";
 import { useArchiveSync } from "@/features/local-archive/archiveSyncManager";
 import { useObserverArchiveReconciliation } from "@/features/local-archive/useObserverArchiveSeed";
 import { useAgentMetricArchiveSeed } from "@/features/local-archive/useAgentMetricArchiveSeed";
-import { useProfileQuery } from "@/features/profile/hooks";
+import { useProfileQuery, useUserSearchQuery } from "@/features/profile/hooks";
 import { SendFeedbackController } from "@/features/settings/ui/SendFeedbackController";
 import {
   DEFAULT_SETTINGS_SECTION,
@@ -89,11 +96,18 @@ import { useMessageDeepLinks } from "@/shared/useMessageDeepLinks";
 import { SidebarInset, SidebarProvider } from "@/shared/ui/sidebar";
 import { RelayConnectionOverlay } from "@/app/RelayConnectionOverlay";
 import { useSidebarRelayConnectionCard } from "@/features/sidebar/ui/useSidebarRelayConnectionCard";
+import type { CreateEncryptedChannelInput } from "@/features/sidebar/lib/useCreateChannelForm";
 
 const LazySettingsScreen = React.lazy(async () => {
   const module = await import("@/features/settings/ui/SettingsScreen");
   return { default: module.SettingsScreen };
 });
+
+function shortMemberPubkey(pubkey: string): string {
+  return pubkey.length > 18
+    ? `${pubkey.slice(0, 8)}…${pubkey.slice(-8)}`
+    : pubkey;
+}
 
 export function AppShell() {
   useWebviewZoomShortcuts();
@@ -165,6 +179,66 @@ export function AppShell() {
   const startupReady = useDeferredStartup();
 
   const identityQuery = useIdentityQuery();
+  const marmotScope = communitiesHook.activeCommunity?.id ?? "no-community";
+  const marmotStatusQuery = useMarmotBridgeStatusQuery(marmotScope);
+  const marmotEnabled = marmotStatusQuery.data?.enabled === true;
+  const marmotConversationsQuery = useMarmotConversationsQuery(
+    marmotScope,
+    marmotEnabled,
+  );
+  const createMarmotConversationMutation =
+    useCreateMarmotConversationMutation(marmotScope);
+  const relayMembersQuery = useRelayMembersQuery(marmotEnabled);
+  const relayMembers = relayMembersQuery.data;
+  const useOpenRelayProfileFallback =
+    marmotEnabled &&
+    relayMembersQuery.isSuccess &&
+    (relayMembers?.length ?? 0) === 0;
+  const previewProfilesQuery = useUserSearchQuery("", {
+    allowEmpty: true,
+    enabled: useOpenRelayProfileFallback,
+    limit: 25,
+  });
+  const { refetch: refetchPreviewProfiles } = previewProfilesQuery;
+  React.useEffect(() => {
+    if (!useOpenRelayProfileFallback) return;
+    const timer = window.setInterval(() => {
+      void refetchPreviewProfiles();
+    }, 5_000);
+    return () => window.clearInterval(timer);
+  }, [refetchPreviewProfiles, useOpenRelayProfileFallback]);
+  useMarmotProjectionEvents(marmotScope, marmotEnabled);
+  const encryptedMemberOptions = React.useMemo(() => {
+    const memberOptions = (relayMembers ?? [])
+      .filter(
+        (member) =>
+          member.pubkey.toLowerCase() !==
+          identityQuery.data?.pubkey.toLowerCase(),
+      )
+      .map((member) => ({
+        pubkey: member.pubkey,
+        label: shortMemberPubkey(member.pubkey),
+      }));
+    if (memberOptions.length > 0) return memberOptions;
+
+    const seen = new Set<string>();
+    return (previewProfilesQuery.data ?? [])
+      .filter((profile) => {
+        const pubkey = profile.pubkey.toLowerCase();
+        if (
+          pubkey === identityQuery.data?.pubkey.toLowerCase() ||
+          seen.has(pubkey)
+        ) {
+          return false;
+        }
+        seen.add(pubkey);
+        return true;
+      })
+      .map((profile) => ({
+        pubkey: profile.pubkey,
+        label: profile.displayName?.trim() || shortMemberPubkey(profile.pubkey),
+      }));
+  }, [identityQuery.data?.pubkey, previewProfilesQuery.data, relayMembers]);
   const { mutedChannelIds, muteChannel, unmuteChannel } = useChannelMutes(
     identityQuery.data?.pubkey,
   );
@@ -468,6 +542,22 @@ export function AppShell() {
       void applyAgents(templateId, createdChannel.id);
     },
     [applyAgents, applyCanvas, createChannelMutation, goChannel],
+  );
+
+  const handleCreateEncryptedChannel = React.useCallback(
+    async ({
+      description,
+      inviteePubkey,
+      name,
+    }: CreateEncryptedChannelInput) => {
+      const conversation = await createMarmotConversationMutation.mutateAsync({
+        name,
+        description,
+        inviteePubkey,
+      });
+      await goChannel(conversation.conversationId);
+    },
+    [createMarmotConversationMutation.mutateAsync, goChannel],
   );
 
   const handleCreateForum = React.useCallback(
@@ -783,7 +873,10 @@ export function AppShell() {
                           addCommunityPrefill={addCommunityDialog.prefill}
                           isAddCommunityOpen={addCommunityDialog.open}
                           relayConnectionCard={relayConnectionCard}
-                          isCreatingChannel={createChannelMutation.isPending}
+                          isCreatingChannel={
+                            createChannelMutation.isPending ||
+                            createMarmotConversationMutation.isPending
+                          }
                           isCreatingForum={createForumMutation.isPending}
                           isLoading={channelsQuery.isLoading}
                           isCreateChannelOpen={isCreateChannelOpen}
@@ -810,6 +903,14 @@ export function AppShell() {
                           selfPresenceStatus={presenceSession.currentStatus}
                           communities={communitiesHook.communities}
                           onCreateChannel={handleCreateChannel}
+                          onCreateEncryptedChannel={
+                            handleCreateEncryptedChannel
+                          }
+                          supportsEncryptedChannels={marmotEnabled}
+                          encryptedConversations={
+                            marmotConversationsQuery.data ?? []
+                          }
+                          encryptedMemberOptions={encryptedMemberOptions}
                           onCreateForum={handleCreateForum}
                           onHideDm={handleHideDm}
                           onMarkAllChannelsRead={markAllChannelsRead}
@@ -897,10 +998,13 @@ export function AppShell() {
                       isChannelManagementOpen={isChannelManagementOpen}
                       isCreatingBrowseChannel={
                         createChannelMutation.isPending ||
-                        createForumMutation.isPending
+                        createForumMutation.isPending ||
+                        createMarmotConversationMutation.isPending
                       }
+                      encryptedMemberOptions={encryptedMemberOptions}
                       onBrowseChannelJoin={handleBrowseChannelJoin}
                       onBrowseChannelCreate={handleBrowseChannelCreate}
+                      onCreateEncryptedChannel={handleCreateEncryptedChannel}
                       onBrowseDialogOpenChange={handleBrowseDialogOpenChange}
                       onChannelManagementOpenChange={(open) => {
                         setIsChannelManagementOpen(open);
@@ -916,6 +1020,7 @@ export function AppShell() {
                       onSelectChannel={(channelId) => {
                         void goChannel(channelId);
                       }}
+                      supportsEncryptedChannels={marmotEnabled}
                     />
                     <SendFeedbackController
                       onOpenChange={setIsSendFeedbackOpen}

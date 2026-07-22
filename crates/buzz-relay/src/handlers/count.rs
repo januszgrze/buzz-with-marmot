@@ -49,6 +49,14 @@ pub async fn handle_count(
         }
     };
 
+    if !super::req::marmot_group_filters_authorized(&filters) {
+        conn.send(RelayMessage::closed(
+            &sub_id,
+            "restricted: kind 445 counts require an explicit kind and exactly one valid #h routing id",
+        ));
+        return;
+    }
+
     // P-gated kinds (gift wraps, member notifications, observer frames) require
     // the caller's own pubkey in the #p tag — same enforcement as WS REQ handler.
     let authed_pubkey_hex = hex::encode(&pubkey_bytes);

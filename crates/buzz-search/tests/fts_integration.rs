@@ -8,8 +8,9 @@
 
 use buzz_core::{
     kind::{
-        AUTHOR_ONLY_KINDS, KIND_AGENT_TURN_METRIC, KIND_MEMBER_ADDED_NOTIFICATION,
-        KIND_MEMBER_REMOVED_NOTIFICATION, P_GATED_KINDS,
+        AUTHOR_ONLY_KINDS, KIND_AGENT_TURN_METRIC, KIND_MARMOT_GROUP_MESSAGE,
+        KIND_MARMOT_KEY_PACKAGE, KIND_MEMBER_ADDED_NOTIFICATION, KIND_MEMBER_REMOVED_NOTIFICATION,
+        P_GATED_KINDS,
     },
     CommunityId,
 };
@@ -28,6 +29,7 @@ const MIGRATION_0007_SQL: &str = include_str!("../../../migrations/0007_nip_rs_r
 const MIGRATION_0008_SQL: &str =
     include_str!("../../../migrations/0008_fresh_install_search_allowlist.sql");
 const MIGRATION_0014_SQL: &str = include_str!("../../../migrations/0014_push_lease_fts.sql");
+const MIGRATION_0025_SQL: &str = include_str!("../../../migrations/0025_marmot_fts.sql");
 
 async fn setup() -> (PgPool, String) {
     let url = std::env::var("BUZZ_TEST_DATABASE_URL").unwrap_or_else(|_| TEST_DB_URL.to_string());
@@ -81,6 +83,9 @@ async fn setup() -> (PgPool, String) {
     pool.execute(MIGRATION_0014_SQL)
         .await
         .expect("apply 0014 migration");
+    pool.execute(MIGRATION_0025_SQL)
+        .await
+        .expect("apply 0025 migration");
     (pool, schema)
 }
 
@@ -1094,8 +1099,10 @@ async fn very_long_query_is_bounded_before_pg_parse() {
 ///   - 44100 = `KIND_MEMBER_ADDED_NOTIFICATION`  (p-gated membership notice)
 ///   - 44101 = `KIND_MEMBER_REMOVED_NOTIFICATION` (p-gated membership notice)
 ///   - 44200 = `KIND_AGENT_TURN_METRIC` (NIP-AM: p-gated encrypted turn metrics)
+///   - 445   = `KIND_MARMOT_GROUP_MESSAGE` (opaque MLS transport envelope)
+///   - 30443 = `KIND_MARMOT_KEY_PACKAGE` (public binary MLS KeyPackage)
 ///
-/// All seven events are inserted with the same unique token in their content
+/// All excluded events are inserted with the same unique token in their content
 /// so a single search query exercises every kind in one round-trip. Only
 /// the kind:9 control must surface — the excluded kinds must not.
 ///
@@ -1201,6 +1208,31 @@ async fn excluded_kinds_are_storage_level_unsearchable() {
     )
     .await;
 
+    // Marmot kind:445 group envelope and kind:30443 KeyPackage are opaque
+    // base64 transport payloads and MUST NOT be searchable.
+    insert_event(
+        &pool,
+        c,
+        rand_bytes32(),
+        rand_bytes32(),
+        KIND_MARMOT_GROUP_MESSAGE as i32,
+        &format!("Marmot group ciphertext — {token}"),
+        None,
+        1_700_000_007,
+    )
+    .await;
+    insert_event(
+        &pool,
+        c,
+        rand_bytes32(),
+        rand_bytes32(),
+        KIND_MARMOT_KEY_PACKAGE as i32,
+        &format!("Marmot KeyPackage — {token}"),
+        None,
+        1_700_000_008,
+    )
+    .await;
+
     let svc = SearchService::new(pool.clone());
     let result = svc
         .search(&SearchQuery {
@@ -1234,6 +1266,8 @@ async fn excluded_kinds_are_storage_level_unsearchable() {
         KIND_MEMBER_ADDED_NOTIFICATION as i32,
         KIND_MEMBER_REMOVED_NOTIFICATION as i32,
         KIND_AGENT_TURN_METRIC as i32,
+        KIND_MARMOT_GROUP_MESSAGE as i32,
+        KIND_MARMOT_KEY_PACKAGE as i32,
     ] {
         assert!(
             !kinds.contains(&forbidden),

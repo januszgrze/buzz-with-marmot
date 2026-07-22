@@ -16,6 +16,7 @@ import type { ImetaMedia } from "@/features/messages/lib/imetaMediaMarkdown";
 import { rewriteRelayUrl } from "@/shared/lib/mediaUrl";
 import {
   shortHash,
+  type MediaUploadController,
   type UploadingAttachmentPreview,
 } from "@/features/messages/lib/useMediaUpload";
 import { cn } from "@/shared/lib/cn";
@@ -665,3 +666,58 @@ export const ComposerAttachments = React.memo(function ComposerAttachments({
     </LayoutGroup>
   );
 });
+
+/** Upload errors and attachment previews shared by every full message composer. */
+export function ComposerMediaStatus({
+  enabled,
+  media,
+  onEditSave,
+  onRemove,
+  onRevert,
+  onToggleSpoiler,
+  spoileredUrls,
+}: {
+  enabled: boolean;
+  media: MediaUploadController;
+  onEditSave: (url: string, bytes: Uint8Array) => Promise<void>;
+  onRemove: (url: string) => void;
+  onRevert: (url: string) => void;
+  onToggleSpoiler: (url: string) => void;
+  spoileredUrls: ReadonlySet<string>;
+}) {
+  if (!enabled) return null;
+
+  return (
+    <>
+      {media.uploadState.status === "error" ? (
+        <div className="mb-2 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          Upload failed: {media.uploadState.message}
+          <button
+            className="ml-2 underline"
+            onClick={() => media.setUploadState({ status: "idle" })}
+            type="button"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+      {media.pendingImeta.length > 0 || media.isUploading ? (
+        <div className="mb-2 flex items-center gap-2">
+          <ComposerAttachments
+            attachments={media.pendingImeta}
+            isUploading={media.isUploading}
+            onCancelUpload={media.cancelUpload}
+            onEditSave={onEditSave}
+            onRemove={onRemove}
+            onRevert={onRevert}
+            onToggleSpoiler={onToggleSpoiler}
+            originalUrlByUrl={media.originalUrlByUrl}
+            spoileredUrls={spoileredUrls}
+            uploadingCount={media.uploadingCount}
+            uploadingPreviews={media.uploadingPreviews}
+          />
+        </div>
+      ) : null}
+    </>
+  );
+}

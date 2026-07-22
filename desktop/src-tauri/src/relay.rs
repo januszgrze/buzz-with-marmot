@@ -235,7 +235,7 @@ pub(crate) async fn parse_json_response<T: DeserializeOwned>(
 ///
 /// Matches the canonical format emitted by the relay in both HTTP 429 bodies
 /// and CLOSED/NOTICE messages: `quota exceeded; retry in 4s`.
-fn extract_retry_in_hint(body: &str) -> Option<u64> {
+pub(crate) fn extract_retry_in_hint(body: &str) -> Option<u64> {
     let re_match = body.find("retry in ")?;
     let after = &body[re_match + "retry in ".len()..];
     let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();

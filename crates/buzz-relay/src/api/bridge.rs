@@ -721,6 +721,13 @@ pub async fn query_events(
         .collect::<Result<_, _>>()
         .map_err(|e| api_error(StatusCode::BAD_REQUEST, &format!("invalid filters: {e}")))?;
 
+    if !crate::handlers::req::marmot_group_filters_authorized(&filters) {
+        return Err(api_error(
+            StatusCode::FORBIDDEN,
+            "restricted: kind 445 reads require an explicit kind and exactly one valid #h routing id",
+        ));
+    }
+
     // P-gated kinds (gift wraps, member notifications, observer frames) require
     // the caller's own pubkey in the #p tag — same enforcement as WS REQ handler.
     let authed_pubkey_hex = pubkey.to_hex();
@@ -1102,6 +1109,13 @@ pub async fn count_events(
 
     let filters: Vec<nostr::Filter> = serde_json::from_slice(&body)
         .map_err(|e| api_error(StatusCode::BAD_REQUEST, &format!("invalid filters: {e}")))?;
+
+    if !crate::handlers::req::marmot_group_filters_authorized(&filters) {
+        return Err(api_error(
+            StatusCode::FORBIDDEN,
+            "restricted: kind 445 counts require an explicit kind and exactly one valid #h routing id",
+        ));
+    }
 
     // P-gated kinds enforcement — same as WS REQ and /query.
     let authed_pubkey_hex = pubkey.to_hex();

@@ -172,6 +172,14 @@ pub async fn import_identity(
     nsec: String,
     app_handle: tauri::AppHandle,
 ) -> Result<IdentityInfo, String> {
+    let _marmot_bridge_transition = app_handle
+        .state::<crate::marmot_bridge::MarmotBridgeState>()
+        .stop_for_transition()
+        .await?;
+    let _marmot_transition = app_handle
+        .state::<crate::marmot_sidecar::MarmotSidecarManager>()
+        .stop_for_transition()
+        .await?;
     tokio::task::spawn_blocking(move || {
         let trimmed = nsec.trim();
         let keys = Keys::parse(trimmed).map_err(|e| format!("Invalid private key: {e}"))?;
@@ -247,6 +255,14 @@ pub async fn import_identity(
 pub async fn persist_current_identity(
     app_handle: tauri::AppHandle,
 ) -> Result<IdentityInfo, String> {
+    let _marmot_bridge_transition = app_handle
+        .state::<crate::marmot_bridge::MarmotBridgeState>()
+        .stop_for_transition()
+        .await?;
+    let _marmot_transition = app_handle
+        .state::<crate::marmot_sidecar::MarmotSidecarManager>()
+        .stop_for_transition()
+        .await?;
     tokio::task::spawn_blocking(move || {
         let state = app_handle.state::<AppState>();
 
@@ -319,6 +335,15 @@ pub async fn sign_out(app: tauri::AppHandle) -> Result<(), String> {
                 .to_string(),
         );
     }
+
+    let _marmot_bridge_transition = app
+        .state::<crate::marmot_bridge::MarmotBridgeState>()
+        .stop_for_transition()
+        .await?;
+    let _marmot_transition = app
+        .state::<crate::marmot_sidecar::MarmotSidecarManager>()
+        .stop_for_transition()
+        .await?;
 
     // Stop all managed agents before restart so they don't race the wipe.
     if let Err(e) = crate::shutdown::shutdown_managed_agents(&app) {

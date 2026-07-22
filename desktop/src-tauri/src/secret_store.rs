@@ -724,6 +724,33 @@ impl SecretStore {
         }
     }
 
+    /// Atomically keep an existing secret or store `candidate` when absent.
+    ///
+    /// The read and conditional insert run under the same interprocess blob
+    /// lock used by all keychain mutations. Concurrent Buzz processes therefore
+    /// agree on one winner instead of overwriting each other's freshly generated
+    /// values. The returned value is the durable winner, which may differ from
+    /// `candidate` when another process inserted first.
+    pub fn load_or_store(&self, key: &str, candidate: &str) -> Result<String, String> {
+        #[cfg(feature = "system-keyring")]
+        {
+            let mut winner = None;
+            self.mutate_blob(|map| {
+                winner = Some(
+                    map.entry(key.to_string())
+                        .or_insert_with(|| candidate.to_string())
+                        .clone(),
+                );
+            })?;
+            winner.ok_or_else(|| "keyring conditional insert produced no value".to_string())
+        }
+        #[cfg(not(feature = "system-keyring"))]
+        {
+            let _ = (key, candidate);
+            Err("system-keyring feature disabled".to_string())
+        }
+    }
+
     /// Store `value` for `key`. Reports `Err` on availability failures — callers
     /// decide whether to fall back to file storage.
     pub fn store(&self, key: &str, value: &str) -> Result<(), String> {
