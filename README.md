@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/screenshots/marmot-demo.png" alt="Buzz and Marmot encrypted-chat demo" width="760">
+  <img src="docs/assets/screenshots/marmot.png" alt="Buzz and Marmot encrypted-chat demo" width="760">
 </p>
 
 This demo lets two local desktop identities—Alice and Bob—talk through one
