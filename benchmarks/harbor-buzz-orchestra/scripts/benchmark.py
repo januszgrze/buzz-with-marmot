@@ -450,7 +450,14 @@ def launch_gui(state: dict[str, str]) -> subprocess.Popen:
     sidecar_dir = desktop_dir / "src-tauri" / "binaries"
     sidecar_dir.mkdir(parents=True, exist_ok=True)
     binaries = ensure_binaries()
-    for name in ("buzz-acp", "buzz-agent", "buzz-dev-mcp", "git-credential-nostr", "buzz"):
+    for name in (
+        "buzz-acp",
+        "buzz-agent",
+        "buzz-dev-mcp",
+        "buzz-marmot-sidecar",
+        "git-credential-nostr",
+        "buzz",
+    ):
         stub = sidecar_dir / f"{name}-{triple}"
         if not stub.exists():
             stub.touch()

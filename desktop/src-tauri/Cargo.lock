@@ -982,8 +982,10 @@ dependencies = [
  "base64 0.22.1",
  "buzz-agent",
  "buzz-core",
+ "buzz-marmot-ipc",
  "buzz-persona",
  "buzz-sdk",
+ "buzz-ws-client",
  "bytes",
  "bzip2 0.6.1",
  "chrono",
@@ -993,6 +995,7 @@ dependencies = [
  "ed25519-dalek",
  "flate2",
  "futures-util",
+ "getrandom 0.3.4",
  "hex",
  "image",
  "infer",
@@ -1052,6 +1055,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "buzz-marmot-ipc"
+version = "0.1.0"
+dependencies = [
+ "nostr",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "url",
+ "zeroize",
+]
+
+[[package]]
 name = "buzz-persona"
 version = "0.1.0"
 dependencies = [
@@ -1071,6 +1086,20 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "uuid",
+]
+
+[[package]]
+name = "buzz-ws-client"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "nostr",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite 0.29.0",
+ "tracing",
+ "url",
 ]
 
 [[package]]

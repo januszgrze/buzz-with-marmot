@@ -492,7 +492,7 @@ export const MessageRow = React.memo(
           onReactionSelect={
             canToggleReactions ? handleReactionSelect : undefined
           }
-          onRemindLater={handleRemindLater}
+          onRemindLater={message.encrypted ? undefined : handleRemindLater}
           onReply={onReply}
           onUnfollowThread={onUnfollowThread}
           reactionErrorMessage={reactionErrorMessage}
@@ -818,6 +818,7 @@ export const MessageRow = React.memo(
     prev.message.id === next.message.id &&
     prev.message.pubkey === next.message.pubkey &&
     prev.message.body === next.message.body &&
+    prev.message.encrypted === next.message.encrypted &&
     prev.message.author === next.message.author &&
     prev.message.isAgent === next.message.isAgent &&
     prev.message.ownerPubkey === next.message.ownerPubkey &&

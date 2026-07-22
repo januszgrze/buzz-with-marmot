@@ -106,6 +106,14 @@ pub async fn apply_workspace(
     agent_managed_profiles: Option<bool>,
     app: AppHandle,
 ) -> Result<(), String> {
+    let _marmot_bridge_transition = app
+        .state::<crate::marmot_bridge::MarmotBridgeState>()
+        .stop_for_transition()
+        .await?;
+    let _marmot_transition = app
+        .state::<crate::marmot_sidecar::MarmotSidecarManager>()
+        .stop_for_transition()
+        .await?;
     let restore_app = app.clone();
     tokio::task::spawn_blocking(move || {
         let state = app.state::<AppState>();

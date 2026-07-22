@@ -24,6 +24,7 @@ import { clearMarkdownNodeCache } from "@/shared/ui/markdown/nodeCache";
 import { resetVideoPlayerState } from "@/shared/ui/videoPlayerState";
 
 import { initFirstCommunity } from "./communityStorage";
+import { shouldAutoConfigureLocalPreviewCommunity } from "./localPreviewCommunity";
 import type { Community } from "./types";
 
 /**
@@ -94,7 +95,12 @@ export function useCommunityInit(
         try {
           const defaultRelayUrl = await getDefaultRelayUrl();
 
-          if (isSharedIdentity) {
+          const autoConfigureLocalPreview =
+            shouldAutoConfigureLocalPreviewCommunity(
+              import.meta.env.DEV,
+              import.meta.env.VITE_BUZZ_LOCAL_PREVIEW,
+            );
+          if (isSharedIdentity || autoConfigureLocalPreview) {
             const identity = await getIdentity();
             if (cancelled) return;
             initFirstCommunity(defaultRelayUrl, identity.pubkey);

@@ -94,6 +94,94 @@ export function CreateChannelFormFields({
         </div>
       </div>
 
+      {form.supportsEncryptedChannels ? (
+        <div
+          className={cn(
+            "flex min-h-12 items-center justify-between gap-4 rounded-xl py-1",
+            isCreating && "opacity-50",
+          )}
+          data-testid="create-channel-encryption"
+        >
+          <label
+            className="min-w-0 cursor-pointer space-y-0.5"
+            htmlFor="create-channel-encrypted"
+          >
+            <span className="block text-sm font-medium text-foreground">
+              End-to-end encrypted
+            </span>
+            <span
+              className="block text-xs leading-4 text-muted-foreground/65"
+              id="create-channel-encrypted-description"
+            >
+              Messages can only be read by invited members, not the relay.
+            </span>
+            {form.encrypted && !form.encryptedCreationReady ? (
+              <span
+                className="block text-xs leading-4 text-destructive"
+                data-testid="create-channel-encryption-unavailable"
+              >
+                Encrypted channel creation is not available yet.
+              </span>
+            ) : null}
+          </label>
+          <Switch
+            aria-describedby="create-channel-encrypted-description"
+            checked={form.encrypted}
+            className="shrink-0 shadow-none [&>span]:shadow-none"
+            data-testid="create-channel-encrypted-toggle"
+            disabled={isCreating}
+            id="create-channel-encrypted"
+            onCheckedChange={form.setEncrypted}
+          />
+        </div>
+      ) : null}
+
+      {form.encrypted ? (
+        <fieldset
+          className="space-y-2"
+          data-testid="create-channel-member-picker"
+        >
+          <legend className="text-sm font-medium text-foreground">
+            Invite one member
+          </legend>
+          <p className="text-xs leading-4 text-muted-foreground/65">
+            The desktop preview currently supports exactly two people.
+          </p>
+          {form.encryptedMemberOptions.length === 0 ? (
+            <p className="rounded-xl border border-input bg-muted/40 px-3 py-3 text-sm text-muted-foreground">
+              No other community members are available.
+            </p>
+          ) : (
+            <div className="max-h-40 space-y-1 overflow-y-auto rounded-xl border border-input bg-muted/40 p-1">
+              {form.encryptedMemberOptions.map((member) => {
+                const checked = form.inviteePubkey === member.pubkey;
+                return (
+                  <label
+                    className={cn(
+                      "flex min-h-10 cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-muted/70",
+                      checked && "bg-muted text-foreground",
+                    )}
+                    key={member.pubkey}
+                  >
+                    <input
+                      checked={checked}
+                      disabled={isCreating}
+                      name="create-encrypted-channel-member"
+                      onChange={() => form.setInviteePubkey(member.pubkey)}
+                      type="radio"
+                      value={member.pubkey}
+                    />
+                    <span className="min-w-0 flex-1 truncate">
+                      {member.label}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </fieldset>
+      ) : null}
+
       <div
         className={cn(
           "flex min-h-12 items-center justify-between gap-4 rounded-xl py-1",
@@ -120,7 +208,7 @@ export function CreateChannelFormFields({
           checked={form.visibility === "private"}
           className="shrink-0 shadow-none [&>span]:shadow-none"
           data-testid="create-channel-private-toggle"
-          disabled={isCreating}
+          disabled={isCreating || form.encrypted}
           id="create-channel-private"
           onCheckedChange={(checked) =>
             form.setVisibility(checked ? "private" : "open")
@@ -140,7 +228,7 @@ export function CreateChannelFormFields({
           <select
             className="flex min-h-11 w-full rounded-xl border border-input bg-muted/40 px-3 py-2 text-sm text-muted-foreground/55 shadow-none transition-colors duration-150 ease-out hover:border-muted-foreground/40 focus:border-muted-foreground/50 focus:text-foreground focus-visible:outline-hidden disabled:cursor-not-allowed disabled:opacity-50"
             data-testid="create-channel-template"
-            disabled={isCreating}
+            disabled={isCreating || form.encrypted}
             id="create-channel-template"
             onChange={(event) => form.handleTemplateChange(event.target.value)}
             value={form.selectedTemplateId ?? ""}
@@ -152,6 +240,11 @@ export function CreateChannelFormFields({
               </option>
             ))}
           </select>
+          {form.encrypted ? (
+            <p className="text-xs leading-4 text-muted-foreground/65">
+              Templates are not available for encrypted channels yet.
+            </p>
+          ) : null}
         </div>
       ) : null}
 
@@ -180,13 +273,18 @@ export function CreateChannelFormFooter({
     <div className="flex w-full items-center justify-between gap-3">
       <Popover
         onOpenChange={form.setTypePopoverOpen}
-        open={form.typePopoverOpen}
+        open={!form.encrypted && form.typePopoverOpen}
       >
         <PopoverTrigger asChild>
           <Button
             aria-label={`Channel duration: ${durationLabel}`}
             className="-ml-2.5 h-9 px-2.5 text-sm font-medium text-foreground hover:bg-muted/50"
-            disabled={isCreating}
+            disabled={isCreating || form.encrypted}
+            title={
+              form.encrypted
+                ? "Encrypted channels are ongoing channels"
+                : undefined
+            }
             type="button"
             variant="ghost"
           >
@@ -232,7 +330,11 @@ export function CreateChannelFormFooter({
         form={CREATE_CHANNEL_FORM_ID}
         type="submit"
       >
-        {isCreating ? "Creating..." : (submitLabel ?? `Create ${kindLabel}`)}
+        {isCreating
+          ? "Creating..."
+          : form.encrypted
+            ? "Create encrypted channel"
+            : (submitLabel ?? `Create ${kindLabel}`)}
       </Button>
     </div>
   );

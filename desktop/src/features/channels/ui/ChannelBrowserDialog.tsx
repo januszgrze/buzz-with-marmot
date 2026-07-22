@@ -40,6 +40,8 @@ import {
 
 import {
   type CreateChannelInput,
+  type CreateEncryptedChannelInput,
+  type EncryptedMemberOption,
   useCreateChannelForm,
 } from "@/features/sidebar/lib/useCreateChannelForm";
 import {
@@ -92,6 +94,11 @@ type ChannelBrowserDialogProps = {
    * create live behind a single entry point.
    */
   onCreateChannel?: (input: CreateChannelInput) => Promise<void>;
+  onCreateEncryptedChannel?: (
+    input: CreateEncryptedChannelInput,
+  ) => Promise<void>;
+  supportsEncryptedChannels?: boolean;
+  encryptedMemberOptions?: EncryptedMemberOption[];
   isCreatingChannel?: boolean;
 };
 
@@ -103,6 +110,9 @@ export function ChannelBrowserDialog({
   onJoinChannel,
   onSelectChannel,
   onCreateChannel,
+  onCreateEncryptedChannel,
+  supportsEncryptedChannels = false,
+  encryptedMemberOptions = [],
   isCreatingChannel = false,
 }: ChannelBrowserDialogProps) {
   const [query, setQuery] = React.useState("");
@@ -154,7 +164,10 @@ export function ChannelBrowserDialog({
     initialName: createInitialName,
     isCreating: isCreatingChannel,
     onCreate: onCreateChannel ?? noopCreate,
+    onCreateEncrypted: onCreateEncryptedChannel,
     onCreated: () => onOpenChange(false),
+    supportsEncryptedChannels,
+    encryptedMemberOptions,
   });
 
   // Fuzzy match score per channel id for the current query, so both filtering

@@ -63,6 +63,12 @@ pub struct EventQuery {
     /// Restrict results to events with an `e` tag referencing any of these event IDs (hex).
     /// Uses JSONB containment (`tags @> ...`) against the `tags` column.
     pub e_tags: Option<Vec<String>>,
+    /// Restrict results to events with this exact `h` tag value.
+    ///
+    /// This is distinct from `channel_id`: Marmot kind:445 uses a random
+    /// 32-byte routing identifier in `h` while remaining channel-less in Buzz.
+    /// Uses JSONB containment against the GIN-indexed `tags` column.
+    pub h_tag: Option<String>,
     /// Restrict results to events in any of these channels, while retaining
     /// channel-less global events. Applied before SQL `LIMIT` so access-filtered
     /// historical pages have exact exhaustion semantics.
@@ -97,6 +103,7 @@ impl EventQuery {
             authors: None,
             ids: None,
             e_tags: None,
+            h_tag: None,
             channel_ids: None,
             max_limit: None,
         }
@@ -449,6 +456,12 @@ pub async fn query_events(pool: &PgPool, q: &EventQuery) -> Result<Vec<StoredEve
         }
     }
 
+    if let Some(ref h_tag) = q.h_tag {
+        let containment = serde_json::json!([["h", h_tag]]);
+        qb.push(format!(" AND {col_prefix}tags @> "));
+        qb.push_bind(containment);
+    }
+
     if let Some(s) = q.since {
         qb.push(format!(" AND {col_prefix}created_at >= "))
             .push_bind(s);
@@ -664,6 +677,12 @@ pub async fn count_events(pool: &PgPool, q: &EventQuery) -> Result<i64> {
             }
             qb.push(")");
         }
+    }
+
+    if let Some(ref h_tag) = q.h_tag {
+        let containment = serde_json::json!([["h", h_tag]]);
+        qb.push(format!(" AND {col_prefix}tags @> "));
+        qb.push_bind(containment);
     }
 
     if let Some(s) = q.since {

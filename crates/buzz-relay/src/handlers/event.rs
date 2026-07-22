@@ -7,8 +7,8 @@ use tracing::{debug, error, info, warn};
 
 use buzz_core::event::StoredEvent;
 use buzz_core::kind::{
-    event_kind_u32, is_ephemeral, AUTHOR_ONLY_KINDS, KIND_AGENT_OBSERVER_FRAME, KIND_GIFT_WRAP,
-    KIND_PRESENCE_UPDATE,
+    event_kind_u32, is_ephemeral, outer_signer_may_differ_from_principal, AUTHOR_ONLY_KINDS,
+    KIND_AGENT_OBSERVER_FRAME, KIND_GIFT_WRAP, KIND_MARMOT_GROUP_MESSAGE, KIND_PRESENCE_UPDATE,
 };
 use buzz_core::observer::{
     content_looks_like_nip44, OBSERVER_AGENT_TAG, OBSERVER_FRAME_CONTROL, OBSERVER_FRAME_TAG,
@@ -34,7 +34,8 @@ fn reject(reason: &'static str) {
 /// Bound the `kind` label to prevent cardinality explosion from arbitrary Nostr kinds.
 pub(crate) fn bounded_kind_label(kind: u32) -> String {
     match kind {
-        0..=9 | 1059 | 1063 => kind.to_string(),
+        0..=9 | 444..=445 | 1059 | 1063 => kind.to_string(),
+        30443 => kind.to_string(),
         8000..=8003 | 9000..=9022 | 9030..=9036 => kind.to_string(),
         13534..=13535 => kind.to_string(),
         20000..=29999 => kind.to_string(),
@@ -54,6 +55,12 @@ pub(crate) fn bounded_kind_label(kind: u32) -> String {
 
 fn event_frame_for_sub(sub_id: &str, event_json: &str) -> String {
     format!(r#"["EVENT","{}",{}]"#, sub_id, event_json)
+}
+
+fn workflow_triggers_allowed_for_kind(kind: u32) -> bool {
+    !buzz_core::kind::is_workflow_execution_kind(kind)
+        && !buzz_core::kind::is_command_kind(kind)
+        && !matches!(kind, KIND_GIFT_WRAP | KIND_MARMOT_GROUP_MESSAGE)
 }
 
 fn event_frame_bytes_for_sub(sub_id: &str, event_json: &str) -> Arc<Bytes> {
@@ -502,11 +509,7 @@ async fn dispatch_persistent_event_inner(
             .iter()
             .any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("buzz:workflow"));
 
-    if !buzz_core::kind::is_workflow_execution_kind(kind_u32)
-        && !buzz_core::kind::is_command_kind(kind_u32)
-        && !is_relay_workflow_msg
-        && kind_u32 != KIND_GIFT_WRAP
-    {
+    if workflow_triggers_allowed_for_kind(kind_u32) && !is_relay_workflow_msg {
         let workflow_engine = Arc::clone(&state.workflow_engine);
         let workflow_event = stored_event.clone();
         let trigger_kind = kind_u32.to_string();
@@ -633,8 +636,7 @@ pub async fn handle_event(event: Event, conn: Arc<ConnectionState>, state: Arc<A
     // Must run before both ephemeral and persistent branches. Persistent
     // events get a second check inside ingest_event() (step 3), but
     // ephemeral events bypass the pipeline entirely.
-    let is_gift_wrap = kind_u32 == KIND_GIFT_WRAP;
-    if event.pubkey != auth_pubkey && !is_gift_wrap {
+    if event.pubkey != auth_pubkey && !outer_signer_may_differ_from_principal(kind_u32) {
         reject("invalid");
         conn.send(RelayMessage::ok(
             &event_id_hex,
@@ -1184,6 +1186,19 @@ mod tests {
             ),
             "fan-out frame sharing must not escape a single cycle"
         );
+    }
+
+    #[test]
+    fn opaque_encrypted_transports_never_trigger_workflows() {
+        assert!(!super::workflow_triggers_allowed_for_kind(
+            buzz_core::kind::KIND_GIFT_WRAP
+        ));
+        assert!(!super::workflow_triggers_allowed_for_kind(
+            buzz_core::kind::KIND_MARMOT_GROUP_MESSAGE
+        ));
+        assert!(super::workflow_triggers_allowed_for_kind(
+            buzz_core::kind::KIND_TEXT_NOTE
+        ));
     }
 
     #[test]

@@ -1,9 +1,10 @@
-import type { ChannelVisibility } from "@/shared/api/types";
 import { ChooserDialogContent } from "@/shared/ui/chooser-dialog-content";
 import { Dialog } from "@/shared/ui/dialog";
 
 import {
   type CreateChannelInput,
+  type CreateEncryptedChannelInput,
+  type EncryptedMemberOption,
   useCreateChannelForm,
 } from "@/features/sidebar/lib/useCreateChannelForm";
 import {
@@ -19,13 +20,10 @@ type CreateChannelDialogProps = {
   channelKind: ChannelKind | null;
   isCreating: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreate: (input: {
-    name: string;
-    description?: string;
-    visibility: ChannelVisibility;
-    ttlSeconds?: number;
-    templateId?: string;
-  }) => Promise<void>;
+  onCreate: (input: CreateChannelInput) => Promise<void>;
+  onCreateEncrypted?: (input: CreateEncryptedChannelInput) => Promise<void>;
+  supportsEncryptedChannels?: boolean;
+  encryptedMemberOptions?: EncryptedMemberOption[];
 };
 
 export function CreateChannelDialog({
@@ -33,6 +31,9 @@ export function CreateChannelDialog({
   isCreating,
   onOpenChange,
   onCreate,
+  onCreateEncrypted,
+  supportsEncryptedChannels = false,
+  encryptedMemberOptions = [],
 }: CreateChannelDialogProps) {
   const open = channelKind !== null;
 
@@ -40,8 +41,11 @@ export function CreateChannelDialog({
     channelKind: channelKind ?? "stream",
     active: open,
     isCreating,
-    onCreate: onCreate as (input: CreateChannelInput) => Promise<void>,
+    onCreate,
+    onCreateEncrypted,
     onCreated: () => onOpenChange(false),
+    supportsEncryptedChannels,
+    encryptedMemberOptions,
   });
 
   const kindLabel = channelKind === "forum" ? "forum" : "channel";

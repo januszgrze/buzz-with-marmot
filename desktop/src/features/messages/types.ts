@@ -39,6 +39,8 @@ export type TimelineMessage = {
   respondTo?: "owner-only" | "allowlist" | "anyone";
   time: string;
   body: string;
+  /** True when the body was decrypted locally from an end-to-end encrypted envelope. */
+  encrypted?: boolean;
   parentId?: string | null;
   rootId?: string | null;
   depth: number;

@@ -1,7 +1,11 @@
 import * as React from "react";
 
 import type { Channel } from "@/shared/api/types";
-import type { CreateChannelInput } from "@/features/sidebar/lib/useCreateChannelForm";
+import type {
+  CreateChannelInput,
+  CreateEncryptedChannelInput,
+  EncryptedMemberOption,
+} from "@/features/sidebar/lib/useCreateChannelForm";
 import { useDeferredModalOpen } from "@/shared/ui/deferredModalOpen";
 
 const ChannelBrowserDialog = React.lazy(async () => {
@@ -23,8 +27,13 @@ type AppShellOverlaysProps = {
   currentPubkey?: string;
   isChannelManagementOpen: boolean;
   isCreatingBrowseChannel?: boolean;
+  encryptedMemberOptions?: EncryptedMemberOption[];
   onBrowseChannelJoin: (channelId: string) => Promise<void>;
   onBrowseChannelCreate?: (input: CreateChannelInput) => Promise<void>;
+  onCreateEncryptedChannel?: (
+    input: CreateEncryptedChannelInput,
+  ) => Promise<void>;
+  supportsEncryptedChannels?: boolean;
   onBrowseDialogOpenChange: (open: boolean) => void;
   onChannelManagementOpenChange: (open: boolean) => void;
   onDeleteActiveChannel: () => void;
@@ -38,12 +47,15 @@ export function AppShellOverlays({
   currentPubkey,
   isChannelManagementOpen,
   isCreatingBrowseChannel,
+  encryptedMemberOptions,
   onBrowseChannelJoin,
   onBrowseChannelCreate,
+  onCreateEncryptedChannel,
   onBrowseDialogOpenChange,
   onChannelManagementOpenChange,
   onDeleteActiveChannel,
   onSelectChannel,
+  supportsEncryptedChannels,
 }: AppShellOverlaysProps) {
   const [visibleBrowseDialogType, setVisibleBrowseDialogType] =
     React.useState<BrowseDialogType>(null);
@@ -73,11 +85,14 @@ export function AppShellOverlays({
             channels={channels}
             channelTypeFilter={renderedBrowseDialogType ?? browseDialogType}
             isCreatingChannel={isCreatingBrowseChannel}
+            encryptedMemberOptions={encryptedMemberOptions}
             onCreateChannel={onBrowseChannelCreate}
+            onCreateEncryptedChannel={onCreateEncryptedChannel}
             onJoinChannel={onBrowseChannelJoin}
             onOpenChange={onBrowseDialogOpenChange}
             onSelectChannel={onSelectChannel}
             open={visibleBrowseDialogType !== null}
+            supportsEncryptedChannels={supportsEncryptedChannels}
           />
         </React.Suspense>
       ) : null}

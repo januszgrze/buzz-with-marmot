@@ -256,6 +256,11 @@ impl NostrWsConnection {
                             self.pending_challenge = Some(challenge.clone());
                             self.buffer.push_back(msg);
                         }
+                        RelayMessage::Notice { message }
+                            if message.starts_with("rate-limited:") =>
+                        {
+                            return Err(WsClientError::EventRejected(message));
+                        }
                         other => self.buffer.push_back(other),
                     }
                 }

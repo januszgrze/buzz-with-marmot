@@ -37,6 +37,7 @@ export type MessageTimelineHandle = {
 type MessageTimelineProps = {
   channelId?: string | null;
   channelIntro?: ChannelIntro | null;
+  channelIntroClassName?: string;
   channelName?: string;
   channelType?: ChannelType | null;
   huddleMemberPubkeys?: readonly string[];
@@ -148,6 +149,7 @@ const MessageTimelineBase = React.forwardRef<
   {
     channelId,
     channelIntro = null,
+    channelIntroClassName,
     directMessageIntro = null,
     messages,
     mainEntries,
@@ -573,7 +575,10 @@ const MessageTimelineBase = React.forwardRef<
   const virtualizedLeadingContent = React.useMemo(
     () =>
       activeChannelIntro ? (
-        <ChannelIntroBlock className="pb-4 pt-2" intro={activeChannelIntro} />
+        <ChannelIntroBlock
+          className={cn("pb-4 pt-2", channelIntroClassName)}
+          intro={activeChannelIntro}
+        />
       ) : activeDirectMessageIntro ? (
         <div
           className="mb-2 flex w-full flex-col items-start px-3 pb-2 pt-2 text-left"
@@ -594,7 +599,7 @@ const MessageTimelineBase = React.forwardRef<
           </p>
         </div>
       ) : null,
-    [activeChannelIntro, activeDirectMessageIntro],
+    [activeChannelIntro, activeDirectMessageIntro, channelIntroClassName],
   );
 
   const handleVirtualizerRangeChanged = React.useCallback(() => {
@@ -778,7 +783,7 @@ const MessageTimelineBase = React.forwardRef<
                   /* Top-anchored like the virtualized leading row, so the
                      first message arrives below with zero layout shift. */
                   <ChannelIntroBlock
-                    className="py-2"
+                    className={cn("py-2", channelIntroClassName)}
                     intro={activeChannelIntro}
                   />
                 ) : null}

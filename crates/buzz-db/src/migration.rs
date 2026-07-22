@@ -560,7 +560,7 @@ mod tests {
         let mut migrations: Vec<_> = MIGRATOR.iter().collect();
         migrations.sort_by_key(|migration| migration.version);
 
-        assert_eq!(migrations.len(), 24);
+        assert_eq!(migrations.len(), 25);
         assert_eq!(migrations[0].version, 1);
         assert_eq!(&*migrations[0].description, "initial schema");
         assert!(migrations[0]
@@ -808,6 +808,7 @@ mod tests {
         assert!(matcher.contains("CREATE TABLE push_match_queue"));
         assert!(matcher.contains("AFTER INSERT ON events"));
         assert!(matcher.contains("NEW.kind IN (7, 9, 1059, 40007, 46010)"));
+        assert!(!matcher.contains("445"));
         assert!(!migrations[0].sql.as_str().contains("push_match_queue"));
 
         // Mesh status is a heartbeat, not an audit stream. The additive
@@ -879,6 +880,15 @@ mod tests {
             .to_lowercase()
             .contains("for update"));
         assert!(ttl_shared.contains("NEW.kind <> 9007"));
+
+        // Marmot group envelopes and KeyPackages are opaque base64 transport
+        // payloads, never NIP-50 plaintext. Preserve prior search policy while
+        // forcing both kinds to a storage-level NULL tsvector.
+        assert_eq!(migrations[24].version, 25);
+        let marmot_fts = migrations[24].sql.as_str();
+        assert!(marmot_fts.contains("kind IN (445, 30443)"));
+        assert!(marmot_fts.contains("search_tsv"));
+        assert!(!migrations[0].sql.as_str().contains("30443"));
     }
 
     #[test]

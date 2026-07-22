@@ -14,6 +14,11 @@ import { getEventById } from "@/shared/api/tauri";
 import type { RelayEvent } from "@/shared/api/types";
 import { ViewLoadingFallback } from "@/shared/ui/ViewLoadingFallback";
 
+const LazyMarmotConversationScreen = React.lazy(async () => {
+  const module = await import("@/features/marmot/ui/MarmotConversationScreen");
+  return { default: module.MarmotConversationScreen };
+});
+
 type ChannelRouteScreenProps = {
   autoSendDraftKey: string | null;
   channelId: string;
@@ -95,6 +100,25 @@ async function fetchRouteTargetEvents(
 }
 
 export function ChannelRouteScreen({
+  channelId,
+  ...plainChannelProps
+}: ChannelRouteScreenProps) {
+  if (channelId.startsWith("mcv1_")) {
+    return (
+      <React.Suspense
+        fallback={<ViewLoadingFallback includeHeader kind="channel" />}
+      >
+        <LazyMarmotConversationScreen conversationId={channelId} />
+      </React.Suspense>
+    );
+  }
+
+  return (
+    <PlainChannelRouteScreen channelId={channelId} {...plainChannelProps} />
+  );
+}
+
+function PlainChannelRouteScreen({
   autoSendDraftKey,
   channelId,
   selectedPostId,

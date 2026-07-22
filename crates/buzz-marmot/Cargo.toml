@@ -1,0 +1,24 @@
+[package]
+name = "buzz-marmot"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Native Marmot/MDK account-device runtime for Buzz"
+
+[dependencies]
+cgka-engine = { workspace = true }
+cgka-session = { workspace = true }
+cgka-traits = { workspace = true }
+hex = { workspace = true }
+nostr = { workspace = true }
+rusqlite = { workspace = true }
+storage-sqlite = { workspace = true }
+thiserror = { workspace = true }
+transport-nostr-peeler = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true }

@@ -8,6 +8,8 @@ mod event_sync;
 mod events;
 mod huddle;
 mod managed_agents;
+mod marmot_bridge;
+mod marmot_sidecar;
 mod media_proxy;
 #[cfg(feature = "mesh-llm")]
 mod mesh_llm;
@@ -47,6 +49,11 @@ use huddle::{
     set_voice_input_mode, speak_agent_message, start_huddle, start_stt_pipeline,
 };
 use managed_agents::{backfill_persona_snapshots, ensure_nest, try_regenerate_nest};
+use marmot_bridge::{
+    create_marmot_preview_conversation, get_marmot_bridge_status,
+    list_marmot_preview_conversations, list_marmot_preview_messages, send_marmot_preview_message,
+};
+use marmot_sidecar::get_marmot_runtime_status;
 #[cfg(not(feature = "mesh-llm"))]
 use mesh_llm_stubs::*;
 #[cfg(all(feature = "mesh-llm", target_os = "macos"))]
@@ -346,6 +353,8 @@ pub fn run() {
             });
         })
         .manage(build_app_state())
+        .manage(marmot_bridge::MarmotBridgeState::default())
+        .manage(marmot_sidecar::MarmotSidecarManager::default())
         .manage(ClipboardState::new())
         .manage(PendingCommunityDeepLinks::default())
         .manage(BuilderlabSession::default())
@@ -691,6 +700,12 @@ pub fn run() {
             get_relay_ws_url,
             get_relay_http_url,
             get_media_proxy_port,
+            get_marmot_bridge_status,
+            get_marmot_runtime_status,
+            create_marmot_preview_conversation,
+            list_marmot_preview_conversations,
+            list_marmot_preview_messages,
+            send_marmot_preview_message,
             fetch_link_preview_title,
             discover_acp_auth_methods,
             discover_acp_providers,

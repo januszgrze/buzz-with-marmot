@@ -8,7 +8,7 @@ use tracing::{debug, warn};
 use buzz_core::filter::filters_match;
 use buzz_core::kind::{
     AUTHOR_ONLY_KINDS, KIND_AGENT_ENGRAM, KIND_AGENT_TURN_METRIC, KIND_DM_VISIBILITY,
-    P_GATED_KINDS, RESULT_GATED_KINDS,
+    KIND_MARMOT_GROUP_MESSAGE, P_GATED_KINDS, RESULT_GATED_KINDS,
 };
 use buzz_core::tenant::TenantContext;
 use buzz_db::EventQuery;
@@ -85,6 +85,14 @@ pub async fn handle_req(
             }
         }
     };
+
+    if !marmot_group_filters_authorized(&filters) {
+        conn.send(RelayMessage::closed(
+            &sub_id,
+            "restricted: kind 445 reads require an explicit kind and exactly one valid #h routing id",
+        ));
+        return;
+    }
 
     let mut accessible_channels = if filters_are_nip43_membership_only(&filters) {
         metrics::counter!("buzz_req_global_access_resolution_skips_total", "kind" => "13534")
@@ -769,7 +777,7 @@ pub(crate) fn count_fallback_exceeded(candidate_count: usize) -> bool {
 /// an exact count without post-filtering.
 ///
 /// Pushed constraints: kinds, authors (single or multi), ids, since, until,
-/// channel_id (#h single), #p (single), #d (single, NIP-33-only kinds), #e (any),
+/// channel_id or exact tag match (#h single), #p (single), #d (single, NIP-33-only kinds), #e (any),
 /// channel_ids (injected by caller).
 ///
 /// Anything else (multi-#p, #t, #a, search, multi-#h, #d on non-NIP-33)
@@ -787,7 +795,9 @@ pub fn filter_fully_pushable(filter: &Filter) -> bool {
         let key = tag_key.to_string();
         match key.as_str() {
             "h" => {
-                // Single #h is pushed as channel_id; multi-#h is not.
+                // Single #h is pushed as channel_id for UUID-shaped Buzz
+                // channels and as JSONB tag containment for opaque routes.
+                // Multi-#h is not fully pushed.
                 if tag_values.len() > 1 {
                     return false;
                 }
@@ -924,6 +934,17 @@ fn filter_to_query_params(
         }
     });
 
+    // Push a single exact #h value independently from channel_id. For normal
+    // Buzz channels this is a redundant tag check; for Marmot kind:445 it is
+    // the only SQL routing predicate because the event is intentionally stored
+    // with channel_id = NULL.
+    let h_tag_key = nostr::SingleLetterTag::lowercase(nostr::Alphabet::H);
+    let h_tag = filter.generic_tags.get(&h_tag_key).and_then(|values| {
+        (values.len() == 1)
+            .then(|| values.iter().next().map(ToString::to_string))
+            .flatten()
+    });
+
     // Push single-value #p tag into SQL via event_mentions join.
     // This is critical for gift-wrap (kind:1059) and membership notification
     // queries where >500 events for other recipients would otherwise push
@@ -982,6 +1003,7 @@ fn filter_to_query_params(
         authors,
         ids,
         e_tags,
+        h_tag,
         ..EventQuery::for_community(community)
     }
 }
@@ -1071,6 +1093,58 @@ pub(crate) fn p_gated_filters_authorized(filters: &[Filter], authed_pubkey_hex: 
 
         filter.generic_tags.get(&p_tag).is_some_and(|values| {
             !values.is_empty() && values.iter().all(|value| value == authed_pubkey_hex)
+        })
+    })
+}
+
+/// Require Marmot group reads to name one exact opaque routing identifier.
+///
+/// A kindless filter can match kind:445 and would enumerate every stored route,
+/// so it is rejected even when it also carries an id/author constraint. A
+/// filter that explicitly excludes kind:445 is unaffected. Filters that include
+/// kind:445 must carry exactly one lowercase 32-byte hex `#h` value.
+pub(crate) fn marmot_group_filters_authorized(filters: &[Filter]) -> bool {
+    let h_tag = nostr::SingleLetterTag::lowercase(nostr::Alphabet::H);
+    filters.iter().all(|filter| {
+        let explicitly_targets_marmot = if let Some(kinds) = filter.kinds.as_ref() {
+            if !kinds
+                .iter()
+                .any(|kind| kind.as_u16() as u32 == KIND_MARMOT_GROUP_MESSAGE)
+            {
+                return true;
+            }
+            true
+        } else if filter
+            .generic_tags
+            .iter()
+            .any(|(key, values)| *key != h_tag && !values.is_empty())
+        {
+            // A valid kind:445 envelope has no single-letter tags other than
+            // `h`; an additional #p/#e/etc constraint makes this kindless
+            // filter incapable of matching it.
+            return true;
+        } else {
+            false
+        };
+
+        filter.generic_tags.get(&h_tag).is_some_and(|values| {
+            let is_route = |value: &String| {
+                value.len() == 64
+                    && value
+                        .bytes()
+                        .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+            };
+            let valid_routes = values.iter().filter(|value| is_route(value)).count();
+            // A kindless normal Buzz channel filter carries a UUID-shaped #h
+            // and cannot match a conforming Marmot event, so it remains valid.
+            if explicitly_targets_marmot {
+                values.len() == 1 && valid_routes == 1
+            } else {
+                // A real routing id requires an explicit kind:445 constraint;
+                // kindless route subscriptions would otherwise blur this
+                // privacy gate with ordinary global subscriptions.
+                valid_routes == 0
+            }
         })
     })
 }
@@ -1440,6 +1514,61 @@ mod tests {
             filter_with_channel(channel_id),
         ];
         assert_eq!(extract_channel_id_from_filters(&filters), Some(channel_id));
+    }
+
+    #[test]
+    fn marmot_group_reads_require_one_exact_route() {
+        let kind = nostr::Kind::Custom(KIND_MARMOT_GROUP_MESSAGE as u16);
+        let h_tag = SingleLetterTag::lowercase(Alphabet::H);
+        let route = "ab".repeat(32);
+
+        assert!(!marmot_group_filters_authorized(
+            &[Filter::new().kind(kind)]
+        ));
+        assert!(!marmot_group_filters_authorized(&[Filter::new()
+            .kind(kind)
+            .custom_tags(
+                h_tag,
+                [route.as_str(), "cd".repeat(32).as_str()]
+            ),]));
+        assert!(!marmot_group_filters_authorized(&[Filter::new()
+            .kind(kind)
+            .custom_tag(h_tag, "AB".repeat(32)),]));
+        assert!(marmot_group_filters_authorized(&[Filter::new()
+            .kind(kind)
+            .custom_tag(h_tag, route),]));
+    }
+
+    #[test]
+    fn marmot_gate_preserves_kindless_uuid_channel_filters() {
+        let filter = filter_with_channel(uuid::Uuid::new_v4());
+        assert!(marmot_group_filters_authorized(&[filter]));
+    }
+
+    #[test]
+    fn marmot_gate_rejects_kindless_global_enumeration() {
+        assert!(!marmot_group_filters_authorized(&[Filter::new()]));
+        let route = "ab".repeat(32);
+        assert!(!marmot_group_filters_authorized(&[
+            Filter::new().custom_tag(SingleLetterTag::lowercase(Alphabet::H), route),
+        ]));
+    }
+
+    #[test]
+    fn marmot_route_is_pushed_as_an_exact_tag_predicate() {
+        let route = "ef".repeat(32);
+        let filter = Filter::new()
+            .kind(nostr::Kind::Custom(KIND_MARMOT_GROUP_MESSAGE as u16))
+            .custom_tag(SingleLetterTag::lowercase(Alphabet::H), route.clone());
+        let query = filter_to_query_params(
+            &filter,
+            None,
+            buzz_core::tenant::CommunityId::from_uuid(uuid::Uuid::nil()),
+        );
+
+        assert_eq!(query.channel_id, None);
+        assert_eq!(query.h_tag.as_deref(), Some(route.as_str()));
+        assert!(filter_fully_pushable(&filter));
     }
 
     #[test]
